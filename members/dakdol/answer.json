@@ -1,0 +1,13 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["status", "summary", "verified", "decisions", "non-claims"],
+  "properties": {
+    "status": {"enum": ["done", "blocked", "failed"]},
+    "summary": {"type": "string"},
+    "verified": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["check", "exit"],
+                 "properties": {"check": {"type": "string"}, "exit": {"type": "integer"}}}},
+    "decisions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["what", "chosen", "alternatives"],
+                  "properties": {"what": {"type": "string"}, "chosen": {"type": "string"}, "alternatives": {"type": "array", "items": {"type": "string"}}}}},
+    "non-claims": {"type": "array", "items": {"type": "string"}}
+  }
+}

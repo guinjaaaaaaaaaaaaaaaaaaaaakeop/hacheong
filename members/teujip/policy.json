@@ -1,0 +1,6 @@
+{
+  "tools": "Read,Edit,Write,Glob,Grep,Bash",
+  "sandbox": "workspace-write",
+  "max-turns": 30,
+  "validate": ["red-before-build", "only-tests-touched"]
+}

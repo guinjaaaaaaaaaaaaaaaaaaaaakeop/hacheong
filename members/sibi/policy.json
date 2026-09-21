@@ -1,0 +1,6 @@
+{
+  "tools": "Read,Grep,Glob",
+  "sandbox": "read-only",
+  "max-turns": 12,
+  "validate": ["quotes-required:findings.quote", "no-tree-changes"]
+}

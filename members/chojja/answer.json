@@ -1,0 +1,14 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["status", "summary", "tried", "findings", "non-claims"],
+  "properties": {
+    "status": {"enum": ["done", "blocked", "failed"]},
+    "summary": {"type": "string"},
+    "tried": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["command", "expected", "observed", "ok"],
+              "properties": {"command": {"type": "string"}, "expected": {"type": "string"}, "observed": {"type": "string"}, "ok": {"type": "boolean"}}}},
+    "findings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "quote", "observed", "why"],
+                 "properties": {"kind": {"enum": ["did-not-work", "unclear", "surprise"]}, "quote": {"type": "string"},
+                                "observed": {"type": "string"}, "why": {"type": "string"}}}},
+    "non-claims": {"type": "array", "items": {"type": "string"}}
+  }
+}

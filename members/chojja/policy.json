@@ -1,0 +1,6 @@
+{
+  "tools": "Bash,Read",
+  "sandbox": "workspace-write",
+  "max-turns": 20,
+  "validate": ["quotes-required:findings.quote", "readme-only", "no-tree-changes"]
+}

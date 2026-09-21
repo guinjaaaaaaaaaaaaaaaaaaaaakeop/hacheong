@@ -1,0 +1,59 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hacheong",
+  "version": "1.0.0",
+  "engines": {
+    "python": ">=3.9"
+  },
+  "roles": {
+    "build": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "dakdol",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "quibble": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "sibi",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "nitpick": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "teujip",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "newbie": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "chojja",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ]
+  },
+  "description": "The subcontractor of the LLM-development era: the people a plan hires by role."
+}

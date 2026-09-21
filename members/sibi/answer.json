@@ -1,0 +1,12 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["status", "summary", "findings", "non-claims"],
+  "properties": {
+    "status": {"enum": ["done", "blocked", "failed"]},
+    "summary": {"type": "string"},
+    "findings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "where", "quote", "why"],
+                 "properties": {"kind": {"enum": ["undecided", "contradiction", "unchecked"]}, "where": {"type": "string"},
+                                "quote": {"type": "string"}, "why": {"type": "string"}}}},
+    "non-claims": {"type": "array", "items": {"type": "string"}}
+  }
+}

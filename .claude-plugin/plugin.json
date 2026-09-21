@@ -1,0 +1,58 @@
+{
+  "name": "hacheong",
+  "version": "1.0.0",
+  "engines": {
+    "python": ">=3.9"
+  },
+  "roles": {
+    "build": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "dakdol",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "quibble": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "sibi",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "nitpick": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "teujip",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ],
+    "newbie": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "chojja",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "{host}"
+    ]
+  },
+  "description": "The subcontractor of the LLM-development era: the people a plan hires by role. Each member is a disposition, not a job — 닥돌 (build) builds what the contract says, 시비 (quibble) disputes the contract before anyone builds on it, 트집 (nitpick) writes the tests that will make the builder fail, 초짜 (newbie) tries the result knowing nothing — and each call is a fresh, bounded process with one answer. One runner serves every member; a member is a directory (a role text, an answer schema, a policy), so anyone can add one. What a member may not do is enforced after the fact, not asked for."
+}

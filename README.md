@@ -1,0 +1,59 @@
+# hacheong (하청)
+
+The subcontractor of the LLM-development era: the people a plan hires by role. Each member is a **disposition**, not a job — the same person can be sent at code today and at a plan or a design tomorrow — and each call is a fresh, bounded process with one answer. One runner serves every member; a member is a directory (a role text, an answer schema, a policy), so anyone can add one. What a member may not do is enforced after the fact by the runner, never merely asked of the model.
+
+| member | role key | when | reads | answers |
+|---|---|---|---|---|
+| **닥돌** dakdol | `build` | the build | the contract and the tree | the slice, `verified` checks, `decisions`, `non-claims` |
+| **시비** sibi | `quibble` | before a build | the contract only | what is `undecided`, a `contradiction`, `unchecked` — each with a quote |
+| **트집** teujip | `nitpick` | before a build | the contract only | the tests that will decide it, written to fail; the runner checks they are red |
+| **초짜** chojja | `newbie` | after a build | the README and the program only | what `did-not-work`, is `unclear`, or a `surprise` — each with a quote |
+
+## Install
+
+```
+claude plugin marketplace add <org>/hacheong
+claude plugin install hacheong@hacheong
+```
+
+Codex: `codex plugin marketplace add <org>/hacheong`, `codex plugin add hacheong@hacheong`. A project declares who it hires in hunsu.json: `"roles": {"implementer": "hacheong:build", "verifier": "dwitbuk:eyes"}` — hunsu resolves `hacheong:build` to the argv below and locks it; chongdae spawns argv.
+
+## How a member is called
+
+```
+python3 <plugin root>/worker.py --member <name> --request <chongdae/request@1> --response <file> [--host claude|codex] [--model M] [--effort E] [--max-turns N] [--domain D]
+```
+
+The runner assembles the prompt — `members/<name>/ROLE.md` ⊕ `domains/<domain>/DOMAIN.md` (its common part and the `## <member>` section) ⊕ the request — starts a fresh host session with the member's `policy.json` (tools, sandbox, turn budget) and `answer.json` as the enforced output schema, runs the member's validators over the answer and the session's transcript, and writes the answer atomically with `worker` (host, model, turns, cost, session, the transcript file kept next to it), `member` and `domain`. The domain comes from the request: `domain` if it says so, else the artifact's family (`produces: plan/…` → `plan`), else `code`.
+
+Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims` — plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an answer that broke its own rules is not an answer.
+
+`--prompt-only` prints the exact prompt instead of calling a host — for a session that dispatches its host's own subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer verbatim.
+
+## Validators (the runner's, chosen per member in `policy.json`)
+
+`quotes-required:<collection>.<field>` every item carries a non-empty quote · `no-tree-changes` the tree is as it was (git) · `checks-ran` every `verified[].check` appears as a command in the transcript · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing changed outside `tests` · `readme-only` no source file was opened (Read or shell) — a newbie who peeked is tainted.
+
+## Adding a member
+
+`python3 <plugin root>/hacheong.py new <name>` scaffolds `members/<name>/` (ROLE.md with placeholders, answer.json, policy.json); write the sentences, pick the kinds and validators, add one `roles` line to plugin.json (all three copies), `hacheong.py check`, then `hacheong.py try <name> --request <a real request>` to see the validated answer. No Python.
+
+Three places a member can live, one runner: this plugin (`members/`); a project (`<project>/hacheong/members/<name>/`, called as `--member ./hacheong/members/<name>` — the project's members and domains shadow the plugin's); another plugin that ships its own `members/` and declares roles pointing at this runner (`{plugin:hacheong}/worker.py --member {plugin:theirs}/members/x`). Domains the same way: `domains/<name>/DOMAIN.md` here or under the project's `hacheong/domains/`.
+
+## What is fixed
+
+The request and the answer envelope (chongdae's request, `status/summary/non-claims`, `worker`), the host adapters, the validator set. A member may not change these; when they must change, this plugin's version does.
+
+## Limits
+
+- One domain shipped (`code`). A member sent at a domain with no text works from its role alone and says so.
+- A validator sees the transcript, not the model's mind: `readme-only` catches reads it can see (tool calls, `cat`/`grep`/… in shell), not a model that already knew the code.
+- chongdae hires these around a task: `add … --before quibble --after newbie` (or `before`/`after` on a plan task, `stages` on a plan). A `before` role's findings hold the task until a human accepts them; an `after` role's go to the record. `nitpick` is not a stage: 트집 is a task of its own (`add tests --role nitpick --tests …`), since its output is the contract's tests.
+
+## Versioning
+
+Semver, and a version names one content: every change to the source — code, role text, this README — bumps the version in all three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and the marketplace entries before it is used anywhere. **patch**: behavior or wording, every interface unchanged. **minor**: a new member, field, validator or domain; what exists keeps working. **major**: the request, the envelope, or `worker` changes shape.
+
+## Self-check
+
+`python3 test_hacheong.py` — members load and assemble, the host stream parses into an answer and nothing short of a real one is `done`, each validator fires on a recorded case, project-local members and domains shadow the plugin's, `new` scaffolds something `check` refuses until it is written. No model calls.

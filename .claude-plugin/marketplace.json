@@ -4,14 +4,14 @@
     "name": "guineeeeeeeeeeeeeeeeeeeeeeeerm"
   },
   "metadata": {
-    "description": "hacheong on its own: `claude plugin marketplace add <org>/hacheong` then `claude plugin install hacheong@hacheong`.",
-    "version": "1.0.0"
+    "description": "hacheong on its own: `claude plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong` then `claude plugin install hacheong@hacheong`.",
+    "version": "1.1.0"
   },
   "plugins": [
     {
       "name": "hacheong",
       "source": "./",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "The subcontractor of the LLM-development era: the people a plan hires by role."
     }
   ]

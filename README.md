@@ -12,11 +12,11 @@ The subcontractor of the LLM-development era: the people a plan hires by role. E
 ## Install
 
 ```
-claude plugin marketplace add <org>/hacheong
+claude plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong
 claude plugin install hacheong@hacheong
 ```
 
-Codex: `codex plugin marketplace add <org>/hacheong`, `codex plugin add hacheong@hacheong`. A project declares who it hires in hunsu.json: `"roles": {"implementer": "hacheong:build", "verifier": "dwitbuk:eyes"}` — hunsu resolves `hacheong:build` to the argv below and locks it; chongdae spawns argv.
+Codex: `codex plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong`, `codex plugin add hacheong@hacheong`. A project declares who it hires in hunsu.json: `"roles": {"implementer": "hacheong:build", "verifier": "dwitbuk:eyes"}` — hunsu resolves `hacheong:build` to the argv below and locks it; chongdae spawns argv.
 
 ## How a member is called
 
@@ -46,7 +46,8 @@ The request and the answer envelope (chongdae's request, `status/summary/non-cla
 
 ## Limits
 
-- One domain shipped (`code`). A member sent at a domain with no text works from its role alone and says so.
+- Two domains shipped: `code`, and `plan` (the artifact is the plan document itself: 닥돌 writes sections with acceptance sentences, 시비 quarrels with sentences that leave two readings or promise the unrequested, 트집 writes counter-examples, 초짜 reads it as the person who asked). A member sent at a domain with no text works from its role alone and says so.
+- A member's session is a fresh process, but not an empty one: on Claude Code it receives the project's SessionStart modes (every enabled plugin's hook runs; `--setting-sources ""` does not keep them out, and the flag that would cannot stay logged in). A mode written for the person's session — "leave the code for the user to write" — reaches the builder too. hacheong does not filter modes; hunsu's judge reads each mode's injected text beside each member's prompt (`--prompt-only`), so the contradiction is found before a worker is hired, and the project's resolution decides.
 - A validator sees the transcript, not the model's mind: `readme-only` catches reads it can see (tool calls, `cat`/`grep`/… in shell), not a model that already knew the code.
 - chongdae hires these around a task: `add … --before quibble --after newbie` (or `before`/`after` on a plan task, `stages` on a plan). A `before` role's findings hold the task until a human accepts them; an `after` role's go to the record. `nitpick` is not a stage: 트집 is a task of its own (`add tests --role nitpick --tests …`), since its output is the contract's tests.
 

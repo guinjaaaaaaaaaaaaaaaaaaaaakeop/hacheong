@@ -159,7 +159,7 @@ def claude(prompt, member, args, target):
     if args.effort:
         cmd += ["--effort", args.effort]
     done = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=target,
-                          env=dict(os.environ, CLAUDE_CODE_DISABLE_AUTO_MEMORY="1", CHARNESS_WORKER="1"))
+                          env=dict(os.environ, CLAUDE_CODE_DISABLE_AUTO_MEMORY="1", AGENT_WORKER="1"))
     stdout = done.stdout.decode("utf-8", "replace")
     out = parse_claude(done.returncode, stdout, done.stderr.decode("utf-8", "replace"))
     out["worker"] = worker_record(stdout, args.response, "claude-code", args.model)
@@ -170,14 +170,14 @@ def codex(prompt, member, args, target):
     tmp = tempfile.mkdtemp(prefix="hacheong-")
     schema_path, out_path = os.path.join(tmp, "schema.json"), os.path.join(tmp, "last.txt")
     Path(schema_path).write_text(json.dumps(member["schema"]), encoding="utf-8")
-    sandbox = os.environ.get("CHARNESS_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
+    sandbox = os.environ.get("AGENT_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
     cmd = [shutil.which("codex") or "codex", "exec", "--json", "--skip-git-repo-check", "--output-schema", schema_path, "-o", out_path, "-C", target, "-s", sandbox]
     if args.model:
         cmd += ["-m", args.model]
     if args.effort:
         cmd += ["-c", "model_reasoning_effort=%s" % json.dumps(args.effort)]
     cmd.append("-")
-    done = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, env=dict(os.environ, CHARNESS_WORKER="1"))
+    done = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, env=dict(os.environ, AGENT_WORKER="1"))
     try:
         out = json.loads(Path(out_path).read_text(encoding="utf-8").strip())
         if not isinstance(out, dict) or out.get("status") not in ("done", "blocked", "failed"):

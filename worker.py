@@ -362,6 +362,9 @@ def validate(out, member, request, target, stream_text, host, before):
         elif name == "readme-only":
             # a newbie reads docs and runs the program; opening source is peeking. Bash reads count too.
             doc = re.compile(r"(^|/)(README[^/]*|readme[^/]*|docs?/|CHANGELOG[^/]*|LICENSE[^/]*)$|\.md$", re.I)
+            if request.get("domain") == "site":
+                # a site's product is its generated pages: reading one is what a visitor does, not peeking at the source
+                doc = re.compile(doc.pattern + r"|\.(?:html?|css|png|jpe?g|gif|svg|webp|xml|txt)$", re.I)
             readers = re.compile(r"^\s*(?:\w+=\S+\s+)*(cat|less|more|head|tail|sed|awk|grep|rg|bat|vim|nano|view|strings|od|xxd)\b")
 
             def in_project(tok):   # a file of the project tree (not the scratch dir, not the program being *run*)

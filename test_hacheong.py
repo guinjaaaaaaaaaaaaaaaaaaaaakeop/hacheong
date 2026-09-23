@@ -205,6 +205,12 @@ def test_validators_fire_on_recorded_cases():
         out = w.validate(dict(clean), chojja, REQUEST, r.dir, ran, "claude-code", w.tree_state(r.dir))
         assert out["status"] == "done", out
         assert w.validate(dict(clean), chojja, REQUEST, r.dir, claude_stream(("Bash", {"command": "head -5 %s/app.py" % r.dir}), result=clean), "claude-code", w.tree_state(r.dir))["status"] == "failed"
+        # a site's generated page is the product: reading it is a visitor's read in the site domain, peeking in the code domain
+        r.write("docs/index.html", "<p>hi</p>\n")
+        page = claude_stream(("Read", {"file_path": r.dir + "/docs/index.html"}), result=clean)
+        assert w.validate(dict(clean), chojja, dict(REQUEST, domain="site"), r.dir, page, "claude-code", w.tree_state(r.dir))["status"] == "done"
+        assert w.validate(dict(clean), chojja, REQUEST, r.dir, page, "claude-code", w.tree_state(r.dir))["status"] == "failed"
+        os.remove(os.path.join(r.dir, "docs", "index.html"))
         os.remove(os.path.join(r.dir, "app.py"))
 
 

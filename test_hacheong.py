@@ -164,6 +164,13 @@ def test_validators_fire_on_recorded_cases():
         # codex transcripts: command_execution items
         codex = stream({"type": "item.completed", "item": {"type": "command_execution", "command": "/bin/zsh -lc 'python3 -m unittest tests/test_x.py -k Q_add'"}})
         assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, codex, "codex", before)["status"] == "done"
+        # the same argv, quoted as it ran (zsh would glob the pattern) and reported unquoted: a true claim (seen live: failed three times)
+        quoted = stream({"type": "item.completed", "item": {"type": "command_execution", "command": "/bin/zsh -lc \"python3 -m unittest discover -s tests -p 'test_s[12].py'\""}})
+        claim = dict(GOOD, verified=[{"check": "python3 -m unittest discover -s tests -p test_s[12].py", "exit": 0}])
+        assert w.validate(claim, dakdol, REQUEST, r.dir, quoted, "codex", before)["status"] == "done"
+        # ...while a tidied rewrite of what ran is still not what ran
+        tidied = dict(GOOD, verified=[{"check": "python3 -m unittest discover -s tests -p test_s3.py", "exit": 0}])
+        assert w.validate(tidied, dakdol, REQUEST, r.dir, quoted, "codex", before)["status"] == "failed"
         # red-before-build and only-tests-touched: teujip's tests must fail now, and only tests may change
         teujip = w.load_member("teujip")
         r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        import app\n")
@@ -173,6 +180,9 @@ def test_validators_fire_on_recorded_cases():
         r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        pass\n")
         out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, "", "claude-code", before)
         assert out["status"] == "failed" and "passes before the build" in out["non-claims"][0], out
+        # amending tests the build disputed: the build already stands, so corrected tests may pass — the waiver is the request's
+        amend = dict(REQUEST, amending=[{"test": "tests/test_x.py", "contract_quote": "x", "why": "y"}])
+        assert w.validate(json.loads(json.dumps(ans)), teujip, amend, r.dir, "", "claude-code", before)["status"] == "done"
         r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        self.fail('not built')\n")
         r.write("app.py", "stub = 1\n")
         out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, "", "claude-code", before)

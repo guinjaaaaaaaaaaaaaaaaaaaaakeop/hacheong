@@ -1,13 +1,98 @@
 {
-  "type": "object", "additionalProperties": false,
-  "required": ["status", "summary", "verified", "decisions", "non-claims"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "verified",
+    "decisions",
+    "non-claims",
+    "disputed-tests"
+  ],
   "properties": {
-    "status": {"enum": ["done", "blocked", "failed"]},
-    "summary": {"type": "string"},
-    "verified": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["check", "exit"],
-                 "properties": {"check": {"type": "string"}, "exit": {"type": "integer"}}}},
-    "decisions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["what", "chosen", "alternatives"],
-                  "properties": {"what": {"type": "string"}, "chosen": {"type": "string"}, "alternatives": {"type": "array", "items": {"type": "string"}}}}},
-    "non-claims": {"type": "array", "items": {"type": "string"}}
+    "status": {
+      "enum": [
+        "done",
+        "blocked",
+        "failed"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "verified": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "check",
+          "exit"
+        ],
+        "properties": {
+          "check": {
+            "type": "string"
+          },
+          "exit": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "what",
+          "chosen",
+          "alternatives"
+        ],
+        "properties": {
+          "what": {
+            "type": "string"
+          },
+          "chosen": {
+            "type": "string"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "non-claims": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disputed-tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "test",
+          "contract_quote",
+          "why"
+        ],
+        "properties": {
+          "test": {
+            "type": "string"
+          },
+          "contract_quote": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    }
   }
 }

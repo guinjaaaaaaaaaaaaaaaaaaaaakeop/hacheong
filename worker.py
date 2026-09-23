@@ -289,6 +289,25 @@ def transcript_commands(stream_text, host):
     return cmds, reads
 
 
+def shell_tokens(command):
+    """A command as its argv: the host's `/bin/zsh -lc "..."` wrapper unwrapped, quoting resolved. Unparseable text stays whole."""
+    import shlex
+    c = str(command).strip()
+    m = re.match(r"^(?:/bin/)?(?:ba|z)?sh -l?c (.*)$", c, re.S)
+    try:
+        if m:
+            c = shlex.split(m.group(1))[0]
+        return shlex.split(c)
+    except ValueError:
+        return c.split()
+
+
+def contains(seq, sub):
+    """`sub` occurs in `seq` as a contiguous run (a check run as part of a longer command line still ran)."""
+    n = len(sub)
+    return n > 0 and any(seq[i:i + n] == sub for i in range(len(seq) - n + 1))
+
+
 def validate(out, member, request, target, stream_text, host, before):
     """Run the member's declared validators. Each failure is written into the answer as a non-claim and the status becomes
     `failed` — an answer that broke its own rules is not an answer, whatever it says about itself."""
@@ -309,14 +328,20 @@ def validate(out, member, request, target, stream_text, host, before):
                 changed = sorted(set(k for k in set(before) | set(after) if before.get(k) != after.get(k)))
                 problems.append("no-tree-changes: the tree changed (%s) — this member may not touch the project" % ", ".join(changed[:8]))
         elif name == "checks-ran":
-            # every `verified[].check` must appear as (part of) a command the session actually ran
+            # every `verified[].check` must appear as (part of) a command the session actually ran — compared as shell tokens,
+            # not as text: `-p 'test_s[12].py'` ran quoted (the shell would glob it) and is the same argv reported unquoted
+            ran = [shell_tokens(c) for c in cmds]
             for v in out.get("verified") or []:
                 check = re.sub(r"\s*\(.*\)\s*$", "", str((v or {}).get("check", ""))).strip()   # a trailing remark — "(8 tests, OK)" — is not part of the command
-                core = " ".join(check.split()[1:]) if check.split() else check   # drop the interpreter: python vs python3
-                if check and not any(check in c or (core and core in c) for c in cmds):
+                toks = shell_tokens(check)
+                core = toks[1:] if len(toks) > 1 else toks   # drop the interpreter: python vs python3
+                if check and not any(contains(r, toks) or (core and contains(r, core)) for r in ran):
                     problems.append("checks-ran: `%s` is claimed verified but no such command appears in the session's transcript (report the argv you ran, nothing else)" % check)
         elif name == "red-before-build":
-            # the tests this member wrote must fail now: a contract test that passes before the build decides nothing
+            # the tests this member wrote must fail now: a contract test that passes before the build decides nothing. Not when
+            # the request amends tests the build disputed (`amending`): the build already stands, and the corrected tests may pass
+            if request.get("amending"):
+                continue
             for t in out.get("tests") or []:
                 p = os.path.join(target, t)
                 if not os.path.exists(p):

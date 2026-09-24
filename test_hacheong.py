@@ -261,3 +261,31 @@ if __name__ == "__main__":
                 print("FAIL", name, "--", "%s: %s" % (type(err).__name__, err))
     print("all passed" if not failed else "%d failed" % failed)
     sys.exit(1 if failed else 0)
+
+
+def test_explanation_kept_refuses_a_refactoring_that_dropped_its_words():
+    """A site's split of build.py into five modules lost eleven docstrings and fifteen comments; the checks passed, the eyes
+    accepted, a second task put them back. In the refactor domain the runner compares the project's Python inventory with
+    HEAD — public names, docstrings, comment lines — and refuses an answer where any of them shrank. Outside that domain a
+    build may delete; the validator stays quiet."""
+    with Repo() as r:
+        r.write("app.py", '"""The app."""\n\n\ndef add(store, text):\n    """Append one item."""\n    # the id is the position\n    return len(store) + 1\n\n\ndef _helper():\n    return 0\n')
+        subprocess.run(["git", "add", "-A"], cwd=r.dir); subprocess.run(["git", "commit", "-qm", "before the refactoring"], cwd=r.dir)
+        dakdol = w.load_member("dakdol")
+        refactor = dict(REQUEST, domain="refactor")
+        ran = claude_stream(("Bash", {"command": "python3 -m unittest tests/test_x.py -k Q_add"}))
+        # moved with its words: fine (the private helper may go)
+        os.remove(os.path.join(r.dir, "app.py"))
+        r.write("core/ops.py", '"""The app."""\n\n\ndef add(store, text):\n    """Append one item."""\n    # the id is the position\n    return len(store) + 1\n')
+        assert w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)["status"] == "done"
+        # moved without its docstring and comment: refused, saying what shrank
+        r.write("core/ops.py", '"""The app."""\n\n\ndef add(store, text):\n    return len(store) + 1\n')
+        out = w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)
+        assert out["status"] == "failed" and out["validation"]["failed"] == ["explanation-kept"], out
+        assert "docstrings 2 -> 1" in out["non-claims"][0] and "comment lines 1 -> 0" in out["non-claims"][0], out["non-claims"]
+        # a public name gone: refused too
+        r.write("core/ops.py", '"""The app."""\n\n\ndef append(store, text):\n    """Append one item."""\n    # the id is the position\n    return len(store) + 1\n')
+        out = w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)
+        assert out["status"] == "failed" and "public names gone: add" in out["non-claims"][0], out
+        # the same tree in the code domain: a build may delete; nothing said
+        assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, ran, "claude-code", None)["status"] == "done"

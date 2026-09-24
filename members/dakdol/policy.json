@@ -2,5 +2,8 @@
   "tools": "Read,Edit,Write,Glob,Grep,Bash",
   "sandbox": "workspace-write",
   "max-turns": 40,
-  "validate": ["checks-ran"]
+  "validate": [
+    "checks-ran",
+    "explanation-kept"
+  ]
 }

@@ -28,7 +28,63 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}}}
 POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns"}
-VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched")
+VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "explanation-kept")
+
+
+def py_inventory(text):
+    """What a Python file says besides what it does: its public def/class names, how many docstrings, how many comment
+    lines. A refactoring may move all of these; it may not lose any. Text that will not parse counts as nothing (a broken
+    file fails its checks anyway)."""
+    import ast, io as _io, tokenize
+    names, docs = set(), 0
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return names, docs, 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not node.name.startswith("_"):
+                names.add(node.name)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and ast.get_docstring(node):
+            docs += 1
+    comments = 0
+    try:
+        for t in tokenize.generate_tokens(_io.StringIO(text).readline):
+            if t.type == tokenize.COMMENT:
+                comments += 1
+    except (tokenize.TokenError, IndentationError):
+        pass
+    return names, docs, comments
+
+
+def inventory(target, at_head):
+    """The project's Python inventory as one triple (names, docstrings, comment lines), summed over its .py files — at HEAD
+    (from git) or in the working tree. Tests and records are left out: tests are the contract's, records are not the program."""
+    skip = (".git/", ".chongdae/", ".mangsang/", ".dwitbuk/", "__pycache__/", ".venv/", "tests/", "test/")
+    files = {}
+    if at_head:
+        done = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        for p in done.stdout.split("\n"):
+            p = p.strip()
+            if p.endswith(".py") and not p.startswith(skip) and not any("/" + s in "/" + p for s in skip):
+                shown = subprocess.run(["git", "show", "HEAD:" + p], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if shown.returncode == 0:
+                    files[p] = shown.stdout
+    else:
+        for root, dirs, names in os.walk(target):
+            rel = os.path.relpath(root, target).replace(os.sep, "/") + "/"
+            dirs[:] = [d for d in dirs if not (rel.lstrip("./") + d + "/").startswith(skip) and d + "/" not in skip]
+            for n in names:
+                if n.endswith(".py"):
+                    try:
+                        files[(rel.lstrip("./") + n).lstrip("/")] = open(os.path.join(root, n), encoding="utf-8", errors="replace").read()
+                    except OSError:
+                        pass
+    names, docs, comments = set(), 0, 0
+    for text in files.values():
+        n, d, c = py_inventory(text)
+        names |= n; docs += d; comments += c
+    return names, docs, comments
 
 
 # ---------------------------------------------------------------- members and domains (directories, not code)
@@ -359,6 +415,24 @@ def validate(out, member, request, target, stream_text, host, before):
                 stray = [c for c in changed if c not in allowed and not c.startswith(("tests/", "test/"))]
                 if stray:
                     problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(stray[:8]))
+        elif name == "explanation-kept":
+            # a refactoring keeps what the program says about itself: no public name, docstring or comment present at HEAD is
+            # gone from the tree. Counted over the whole project, since moving is the point. Only in the refactor domain;
+            # elsewhere a build may rightly delete. (A site's split lost 11 docstrings and 15 comments; a second task restored them.)
+            if request.get("domain") != "refactor":
+                continue
+            names0, docs0, comm0 = inventory(target, at_head=True)
+            names1, docs1, comm1 = inventory(target, at_head=False)
+            lost = sorted(names0 - names1)
+            gone = []
+            if lost:
+                gone.append("public names gone: %s" % ", ".join(lost[:8]))
+            if docs1 < docs0:
+                gone.append("docstrings %d -> %d" % (docs0, docs1))
+            if comm1 < comm0:
+                gone.append("comment lines %d -> %d" % (comm0, comm1))
+            if gone:
+                problems.append("explanation-kept: a refactoring moves code and keeps what it says about itself; against HEAD, %s — put them back where the code went" % "; ".join(gone))
         elif name == "readme-only":
             # a newbie reads docs and runs the program; opening source is peeking. Bash reads count too.
             doc = re.compile(r"(^|/)(README[^/]*|readme[^/]*|docs?/|CHANGELOG[^/]*|LICENSE[^/]*)$|\.md$", re.I)

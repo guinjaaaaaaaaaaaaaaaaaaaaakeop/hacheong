@@ -22,8 +22,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa: E402  (vendored: the same file in each plugin of this family)
 
 HERE = Path(__file__).resolve().parent
 ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}}}
@@ -180,24 +181,12 @@ def failed(summary, why, schema=None):
 
 def parse_claude(returncode, stdout, stderr):
     """The host's stream-json -> the answer. Anything short of a well-formed answer is `failed`, never `done`."""
-    result = None
-    for line in stdout.split("\n"):
-        if line.strip():
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(event, dict) and event.get("type") == "result":
-                result = event
-    if returncode or not result or result.get("is_error"):
-        return failed("host exited %d: %s" % (returncode, (result or {}).get("subtype") or stderr[-400:]),
-                      "the host session did not finish; nothing it did is verified")
-    out = result.get("structured_output")
-    if out is None:
-        try:
-            out = json.loads(result.get("result", "").strip())
-        except ValueError:
+    out, why = claude_answer(stdout)
+    if returncode or out is None:
+        if why == "no structured answer":
             return failed("no structured answer", "answer was not the required JSON")
+        return failed("host exited %d: %s" % (returncode, (why or "").replace("claude error: ", "") or stderr[-400:]),
+                      "the host session did not finish; nothing it did is verified")
     if not isinstance(out, dict) or out.get("status") not in ("done", "blocked", "failed"):
         return failed("answer has no valid status", "answer did not match the schema")
     for key, default in (("non-claims", []), ("summary", "")):
@@ -207,98 +196,23 @@ def parse_claude(returncode, stdout, stderr):
 
 def claude(prompt, member, args, target):
     tools = member["policy"].get("tools", "Read,Grep,Glob")
-    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--setting-sources", "",
-           "--strict-mcp-config", "--tools", tools, "--allowedTools", tools, "--max-turns", str(args.max_turns),
-           "--json-schema", json.dumps(member["schema"]), "--add-dir", target, "--permission-mode", "bypassPermissions"]
-    if args.model:
-        cmd += ["--model", args.model]
-    if args.effort:
-        cmd += ["--effort", args.effort]
-    done = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, cwd=target,
-                          env=dict(os.environ, CLAUDE_CODE_DISABLE_AUTO_MEMORY="1", AGENT_WORKER="1"))
-    stdout = done.stdout.decode("utf-8", "replace")
-    out = parse_claude(done.returncode, stdout, done.stderr.decode("utf-8", "replace"))
+    code, stdout, stderr = run_claude(prompt, member["schema"], cwd=target, add_dirs=[target], tools=tools, model=args.model, effort=args.effort, max_turns=args.max_turns, bypass=True)
+    out = parse_claude(code, stdout, stderr)
     out["worker"] = worker_record(stdout, args.response, "claude-code", args.model)
     return out, stdout
 
 
 def codex(prompt, member, args, target):
-    tmp = tempfile.mkdtemp(prefix="hacheong-")
-    schema_path, out_path = os.path.join(tmp, "schema.json"), os.path.join(tmp, "last.txt")
-    Path(schema_path).write_text(json.dumps(member["schema"]), encoding="utf-8")
-    sandbox = os.environ.get("AGENT_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
-    cmd = [shutil.which("codex") or "codex", "exec", "--json", "--skip-git-repo-check", "--output-schema", schema_path, "-o", out_path, "-C", target, "-s", sandbox]
-    if args.model:
-        cmd += ["-m", args.model]
-    if args.effort:
-        cmd += ["-c", "model_reasoning_effort=%s" % json.dumps(args.effort)]
-    cmd.append("-")
-    done = subprocess.run(cmd, input=prompt.encode("utf-8"), capture_output=True, env=dict(os.environ, AGENT_WORKER="1"))
+    sandbox = member["policy"].get("sandbox") or "read-only"   # AGENT_CODEX_SANDBOX in the env overrides it, in run_codex
+    code, stdout, stderr, last = run_codex(prompt, member["schema"], target, sandbox=sandbox, model=args.model, effort=args.effort)
     try:
-        out = json.loads(Path(out_path).read_text(encoding="utf-8").strip())
+        out = json.loads((last or "").strip())
         if not isinstance(out, dict) or out.get("status") not in ("done", "blocked", "failed"):
             out = failed("answer has no valid status", "answer did not match the schema")
     except (OSError, ValueError):
-        out = failed("codex exited %d without a JSON answer" % done.returncode, "the host session did not finish; nothing it did is verified")
-    stdout = done.stdout.decode("utf-8", "replace")
-    out["worker"] = worker_record(stdout, args.response, "codex", args.model, done.stderr.decode("utf-8", "replace"))
+        out = failed("codex exited %d without a JSON answer" % code, "the host session did not finish; nothing it did is verified")
+    out["worker"] = worker_record(stdout, args.response, "codex", args.model, stderr)
     return out, stdout
-
-
-def worker_record(stdout_text, response_path, host, model=None, stderr_text=None):
-    """Who did this call, from the host's own account — model, turns, cost, session — with the whole stream kept next to the
-    response as `<response>.transcript.jsonl`. The runner copies this into `performed_by`; an answer whose procedure is not on
-    disk cannot be audited. Claude Code says it in its stream (`init`, `result`); Codex's `--json` stream has the thread id and
-    the model is in the rollout it keeps for that thread (`turn_context.model`)."""
-    rec = {"host": host, "model": model}
-    if host == "codex":
-        m = re.search(r'"thread_id":\s*"([^"]+)"', stdout_text or "")
-        if m:
-            rec["session"] = m.group(1)
-            home = os.environ.get("HUNSU_CODEX_DIR") or os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-            for dirpath, _, files in os.walk(os.path.join(home, "sessions")):
-                for f in files:
-                    if f.endswith(m.group(1) + ".jsonl"):
-                        with open(os.path.join(dirpath, f), encoding="utf-8", errors="replace") as fh:
-                            for line in fh:
-                                mm = re.search(r'"turn_context".*?"model":\s*"([^"]+)"', line)
-                                if mm:
-                                    rec["model"] = rec["model"] or mm.group(1)
-                                    ee = re.search(r'"effort":\s*"([^"]+)"', line)
-                                    if ee:
-                                        rec["effort"] = ee.group(1)
-                                    break
-        for key, name in (("model", "model"), ("session id", "session"), ("reasoning effort", "effort")):
-            mh = re.search(r"^%s:\s*(.+?)\s*$" % re.escape(key), stderr_text or "", re.M)
-            if mh and not rec.get(name):
-                rec[name] = mh.group(1)
-        kept = "".join(x for x in (stderr_text, stdout_text) if x)
-        if kept:
-            path = re.sub(r"\.json$", "", response_path) + ".transcript.jsonl"
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            with open(path, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(kept if kept.endswith("\n") else kept + "\n")
-            rec["transcript"] = os.path.basename(path)
-        return rec
-    if stdout_text is None:
-        return rec
-    for line in stdout_text.split("\n"):
-        try:
-            event = json.loads(line) if line.strip() else None
-        except ValueError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("type") == "system" and event.get("subtype") == "init":
-            rec["model"] = event.get("model") or model
-        elif event.get("type") == "result":
-            rec["turns"], rec["cost_usd"], rec["session"] = event.get("num_turns"), event.get("total_cost_usd"), event.get("session_id")
-    path = re.sub(r"\.json$", "", response_path) + ".transcript.jsonl"
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(stdout_text if stdout_text.endswith("\n") else stdout_text + "\n")
-    rec["transcript"] = os.path.basename(path)
-    return rec
 
 
 # ---------------------------------------------------------------- validators: what the model cannot be asked to refrain from

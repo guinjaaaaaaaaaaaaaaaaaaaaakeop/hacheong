@@ -96,6 +96,9 @@ the validator set. A member may not change these; when they must change, this pl
   the record. `nitpick` is not a stage: 트집 is a task of its own (`add tests --role nitpick --tests …`), since its
   output is the contract's tests.
 
+- `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
+  hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
+
 ## Versioning
 
 Semver, and a version names one content: every change to the source — code, role text, this README — bumps the version

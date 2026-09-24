@@ -32,6 +32,19 @@ POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns"}
 VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "explanation-kept")
 
 
+def record_paths(target):
+    """The products' records and the environment, not the project: what `record-paths` in hunsu.lock.json declares (each plugin's
+    `records`), else the siblings' names as they were before the lock carried them. Always the run's own transcripts' home."""
+    lock = {}
+    try:
+        lock = json.loads(Path(target, "hunsu.lock.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    declared = lock.get("record-paths")
+    others = sorted({p for ps in declared.values() for p in ps}) if isinstance(declared, dict) else [".chongdae/", ".mangsang/", ".dwitbuk/", "reviews/"]
+    return tuple(sorted(set(others) | {".chongdae/", "hunsu"}))
+
+
 def py_inventory(text):
     """What a Python file says besides what it does: its public def/class names, how many docstrings, how many comment
     lines. A refactoring may move all of these; it may not lose any. Text that will not parse counts as nothing (a broken
@@ -61,7 +74,7 @@ def py_inventory(text):
 def inventory(target, at_head):
     """The project's Python inventory as one triple (names, docstrings, comment lines), summed over its .py files — at HEAD
     (from git) or in the working tree. Tests and records are left out: tests are the contract's, records are not the program."""
-    skip = (".git/", ".chongdae/", ".mangsang/", ".dwitbuk/", "__pycache__/", ".venv/", "tests/", "test/")
+    skip = (".git/", "__pycache__/", ".venv/", "tests/", "test/") + tuple(p for p in record_paths(target) if p.endswith("/"))
     files = {}
     if at_head:
         done = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -227,7 +240,7 @@ def tree_state(target):
         path = line[3:].split(" -> ")[-1].strip().strip('"')
         if "__pycache__" in path or path.endswith((".pyc", ".DS_Store")):   # what interpreters and the OS leave behind is not a change
             continue
-        if path.startswith((".chongdae/", ".dwitbuk/", ".mangsang/")):   # the run's record — where this worker's own transcript lands — is not the project
+        if path.startswith(record_paths(target)):   # the run's record — where this worker's own transcript lands — and the other products' are not the project
             continue
         full = os.path.join(target, path)
         state[path] = hashlib.sha1(open(full, "rb").read()).hexdigest() if os.path.isfile(full) else "gone"

@@ -99,6 +99,9 @@ the validator set. A member may not change these; when they must change, this pl
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
 
+- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
+  comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
+
 ## Versioning
 
 Semver, and a version names one content: every change to the source — code, role text, this README — bumps the version

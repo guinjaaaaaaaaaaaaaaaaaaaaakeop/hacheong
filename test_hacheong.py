@@ -289,3 +289,19 @@ def test_explanation_kept_refuses_a_refactoring_that_dropped_its_words():
         assert out["status"] == "failed" and "public names gone: add" in out["non-claims"][0], out
         # the same tree in the code domain: a build may delete; nothing said
         assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, ran, "claude-code", None)["status"] == "done"
+
+
+def test_the_tree_checks_leave_out_the_records_the_lock_declares():
+    """tree_state and the refactor inventory skipped `.chongdae/ .mangsang/ .dwitbuk/` by name; now the lock's `record-paths`
+    says which paths are records (each plugin declares its own), and without a lock the old names stand."""
+    with Repo() as r:
+        assert w.record_paths(r.dir) == (".chongdae/", ".dwitbuk/", ".mangsang/", "hunsu", "reviews/"), w.record_paths(r.dir)
+        r.write("hunsu.lock.json", json.dumps({"record-paths": {"alpha": [".alpha/"], "beta": []}}))
+        assert w.record_paths(r.dir) == (".alpha/", ".chongdae/", "hunsu"), w.record_paths(r.dir)
+        r.write(".alpha/state.json", "{}")
+        r.write("app.py", "x = 1\n")
+        state = w.tree_state(r.dir)
+        assert "app.py" in state and not any(k.startswith(".alpha/") for k in state), state
+        r.write(".alpha/mod.py", "def hidden():\n    return 1\n")
+        names, _, _ = w.inventory(r.dir, at_head=False)
+        assert "hidden" not in names, names

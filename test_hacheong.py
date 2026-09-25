@@ -80,6 +80,19 @@ def test_the_prompt_is_role_then_domain_section_then_request():
     assert w.domain_for(REQUEST) == "code" and w.domain_for(dict(REQUEST, produces="plan/document@1")) == "plan"
     assert w.domain_for(dict(REQUEST, produces="chongdae/plan@1")) == "code" and w.domain_for(dict(REQUEST, domain="design")) == "design"
     assert w.domain_for(REQUEST, "plan") == "plan"
+    # the newbie's material is the domain's to say: in a plan there is no program to try, and form is the quibbler's
+    prompt, _ = w.assemble(w.load_member("chojja"), REQUEST, "plan")
+    assert "the domain below says what that is" in prompt and "there is no program or README to try here" in prompt
+    assert "is the quibbler's to check, not yours" in prompt
+    # a plan still deciding what to build: a findings section carries sources, not acceptance sentences
+    prompt, _ = w.assemble(mem, REQUEST, "plan")
+    assert "findings:" in prompt and "a claim with no source behind it" in prompt and "has no slices yet" in prompt
+    # where the session runs is said up front: a Codex builder learns before it starts that there is no network and .git is read-only
+    prompt, _ = w.assemble(w.load_member("dakdol"), REQUEST, "code", host="codex")
+    assert "no network" in prompt and "`.git` is read-only" in prompt and "stop with `status: blocked` and name it" in prompt
+    assert prompt.index("# Where you run") < prompt.index("# Request")
+    prompt, _ = w.assemble(w.load_member("sibi"), REQUEST, "code", host="claude")
+    assert "with these tools only: Read,Grep,Glob" in prompt
 
 
 def test_the_envelope_is_added_to_every_schema_and_bad_members_are_refused():
@@ -228,6 +241,9 @@ def test_tests_kept_refuses_a_build_that_changed_the_contracts_tests_even_back_t
         subprocess.run(["git", "checkout", "--", "tests/test_x.py"], cwd=r.dir, check=True)   # "restored" from HEAD
         out = w.validate(json.loads(json.dumps(GOOD)), dakdol, request, r.dir, ran, "claude-code", before)
         assert out["status"] == "failed" and "tests-kept" in out["validation"]["failed"] and "tests/test_x.py" in " ".join(out["non-claims"]), out
+        # a path list given as one string is one path that is not there: nothing was kept
+        out = w.validate(json.loads(json.dumps(GOOD)), dakdol, dict(REQUEST, tests=["tests/test_x.py tests/test_y.py"]), r.dir, ran, "claude-code", w.tree_state(r.dir))
+        assert out["status"] == "failed" and "are not in the tree" in " ".join(out["non-claims"]), out
 
 
 def test_new_scaffolds_a_member_that_check_refuses_until_written():

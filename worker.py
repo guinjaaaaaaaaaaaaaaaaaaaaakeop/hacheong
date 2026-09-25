@@ -175,13 +175,35 @@ def domain_text(domain, member, target=None):
     return None, None
 
 
-def assemble(member, request, domain, target=None):
+def environment_text(member, host):
+    """What the session this call starts can and cannot reach, said up front: a worker that learns mid-task that the network
+    is gone improvises around it (a lock file written by hand, the old tool wrapped in the new one) instead of saying so."""
+    lines = ["# Where you run", ""]
+    if host == "codex":
+        sandbox = os.environ.get("AGENT_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
+        if sandbox == "workspace-write":
+            lines.append("A Codex sandbox (`workspace-write`): you can write inside `target`. By default it has no network — package "
+                         "installs and downloads fail — and `.git` is read-only: no commit, no `git mv`, no branch.")
+        elif sandbox == "read-only":
+            lines.append("A Codex sandbox (`read-only`): you can read and run commands, not write, and there is no network.")
+        else:
+            lines.append("A Codex sandbox (`%s`)." % sandbox)
+    else:
+        lines.append("A Claude Code session with these tools only: %s." % (member["policy"].get("tools") or "Read,Grep,Glob"))
+    lines.append("What the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not "
+                 "yours to work around: stop with `status: blocked` and name it. Do not write by hand what a tool generates "
+                 "(a lock file, a build output) and do not swap in another tool for the one the request names.")
+    return "\n".join(lines)
+
+
+def assemble(member, request, domain, target=None, host=None):
     dtext, dpath = domain_text(domain, member["name"], target)
     parts = ["# Who you are\n\n" + member["role"]]
     if dtext:
         parts.append("# The domain: %s\n\n%s" % (domain, dtext))
     else:
         parts.append("# The domain: %s\n\nNo domain text is available for %r. Work from your role alone and say so in `non-claims`." % (domain, domain))
+    parts.append(environment_text(member, host))
     parts.append("# Request\n\nWork only inside `target`. Do not write the response file; answer with the JSON object.\n\n" + json.dumps(request, ensure_ascii=False, indent=2))
     return "\n\n".join(parts), dpath
 
@@ -349,6 +371,10 @@ def validate(out, member, request, target, stream_text, host, before):
             after = tree_state(target)
             if before is not None and after is not None:
                 changed = [t for t in request.get("tests") or [] if before.get(t) != after.get(t)]
+                absent = [t for t in request.get("tests") or [] if not os.path.isfile(os.path.join(target, t))]
+                if absent:
+                    problems.append("tests-kept: the contract's protected tests are not in the tree (%s) — nothing kept them; "
+                                    "a path list given as one string is one missing path" % ", ".join(absent))
                 if changed:
                     problems.append("tests-kept: changed the contract's protected tests (%s) — they are the contract as given, "
                                     "uncommitted changes included; a test that contradicts the contract goes in `disputed-tests`" % ", ".join(changed))
@@ -422,7 +448,7 @@ def main():
     if args.max_turns is None:
         args.max_turns = int(member["policy"].get("max-turns", os.environ.get("HACHEONG_MAX_TURNS", 40)))
     domain = domain_for(request, args.domain)
-    prompt, _ = assemble(member, request, domain, target)
+    prompt, _ = assemble(member, request, domain, target, "claude" if args.prompt_only else args.host)
     if args.prompt_only:
         print(prompt + "\n\n# Answer\n\nYour whole final message is one JSON object, nothing else, matching this schema:\n" + json.dumps(member["schema"]))
         return 0

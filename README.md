@@ -11,7 +11,7 @@ of the model.
 | **닥돌** dakdol | `build` | the build | the contract and the tree | the slice, `verified` checks, `decisions`, `non-claims` |
 | **시비** sibi | `quibble` | before a build | the contract only | what is `undecided`, a `contradiction`, `unchecked` — each with a quote |
 | **트집** teujip | `nitpick` | before a build | the contract only | the tests that will decide it, written to fail; the runner checks they are red |
-| **초짜** chojja | `newbie` | after a build | the README and the program only | what `did-not-work`, is `unclear`, or a `surprise` — each with a quote |
+| **초짜** chojja | `newbie` | after a build | what the person the work is for would get: the README and the program (a plan: the goal and the plan) | what `did-not-work`, is `unclear`, or a `surprise` — each with a quote |
 
 ## Install
 
@@ -50,7 +50,7 @@ subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference) · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing
 changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
-uncommitted changes included — put back to HEAD is changed too) · `readme-only` no source file was opened (Read or
+uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
 
 ## Adding a member
@@ -79,8 +79,13 @@ the validator set. A member may not change these; when they must change, this pl
   did not put back); `site` (a static site: the author follows the README and builds, the visitor reads the generated
   pages — 초짜 does both in a scratch copy, so the project is never touched); and `plan` (the artifact is the plan
   document itself: 닥돌 writes sections with acceptance sentences, 시비 quarrels with sentences that leave two readings or
-  promise the unrequested, 트집 writes counter-examples, 초짜 reads it as the person who asked). A member sent at a domain
+  promise the unrequested, 트집 writes counter-examples, 초짜 reads it as the person who asked — for intent, not form; a
+  plan still deciding has no slices yet, and a question answered by a survey is a `findings:` section carrying sources
+  instead of acceptance sentences). A member sent at a domain
   with no text works from its role alone and says so.
+- The prompt says where the session runs (`# Where you run`): a Codex `workspace-write` sandbox has no network by default
+  and a read-only `.git`; a Claude Code session has the member's tools only. What the work needs and that place lacks is
+  `blocked`, named — never a hand-written lock file or another tool in the named one's place.
 - A member's session is a fresh process, but not an empty one: on Claude Code it receives the project's SessionStart
   modes (every enabled plugin's hook runs; `--setting-sources ""` does not keep them out, and the flag that would
   cannot stay logged in). A mode written for the person's session — "leave the code for the user to write" — reaches

@@ -10,7 +10,7 @@ Make the checks pass by changing the code, not the tests. Run each check with th
 
 ## teujip
 
-Tests are `unittest` files under `tests/` (or the project's existing test convention — look at what is there); one test method per acceptance sentence at least, named `test_<section id with - as _>_<what>`. Run your files once to confirm they fail for the right reason (the feature is missing, not an import error in the test itself).
+Tests are `unittest` files under `tests/` (or the project's existing test convention — look at what is there); one test method per acceptance sentence at least, named `test_<section id with - as _>_<what>`. Run your files once to confirm they fail for the right reason (the feature is missing, not an import error in the test itself). When the contract changes *how* something is done rather than what comes out — a move to another tool, library or runtime — an output test cannot tell the two apart: a wrapper around the old way passes it. Test the how too (the old entry point is gone or never called, the new one is what runs), and say in `non-claims` what no test can see.
 
 ## chojja
 

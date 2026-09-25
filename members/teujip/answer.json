@@ -4,7 +4,7 @@
   "properties": {
     "status": {"enum": ["done", "blocked", "failed"]},
     "summary": {"type": "string"},
-    "tests": {"type": "array", "items": {"type": "string"}},
+    "tests": {"type": "array", "items": {"type": "string", "description": "a test file you wrote or changed, as a path relative to target (tests/test_x.py) — a path, never a command"}},
     "covers": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["section", "tests"],
                "properties": {"section": {"type": "string"}, "tests": {"type": "array", "items": {"type": "string"}}}}},
     "non-claims": {"type": "array", "items": {"type": "string"}}

@@ -214,6 +214,22 @@ def test_validators_fire_on_recorded_cases():
         os.remove(os.path.join(r.dir, "app.py"))
 
 
+def test_tests_kept_refuses_a_build_that_changed_the_contracts_tests_even_back_to_head():
+    with Repo() as r:
+        r.write("tests/test_x.py", "# first version\n")
+        subprocess.run(["git", "add", "-A"], cwd=r.dir); subprocess.run(["git", "commit", "-qm", "tests"], cwd=r.dir)
+        r.write("tests/test_x.py", "# the contract's newest version, not committed\n")
+        dakdol = w.load_member("dakdol")
+        request = dict(REQUEST, tests=["tests/test_x.py"])
+        ran = claude_stream(("Bash", {"command": "python -m unittest tests/test_x.py -k Q_add"}))
+        before = w.tree_state(r.dir)
+        r.write("app.py", "x = 1\n")   # the build itself: fine
+        assert w.validate(json.loads(json.dumps(GOOD)), dakdol, request, r.dir, ran, "claude-code", before)["status"] == "done"
+        subprocess.run(["git", "checkout", "--", "tests/test_x.py"], cwd=r.dir, check=True)   # "restored" from HEAD
+        out = w.validate(json.loads(json.dumps(GOOD)), dakdol, request, r.dir, ran, "claude-code", before)
+        assert out["status"] == "failed" and "tests-kept" in out["validation"]["failed"] and "tests/test_x.py" in " ".join(out["non-claims"]), out
+
+
 def test_new_scaffolds_a_member_that_check_refuses_until_written():
     with Repo() as r:
         out = io.StringIO()

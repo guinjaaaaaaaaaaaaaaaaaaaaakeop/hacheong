@@ -49,7 +49,9 @@ subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer
 `quotes-required:<collection>.<field>` every item carries a non-empty quote · `no-tree-changes` the tree is as it was
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference) · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing
-changed outside `tests` · `readme-only` no source file was opened (Read or shell) — a newbie who peeked is tainted.
+changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
+uncommitted changes included — put back to HEAD is changed too) · `readme-only` no source file was opened (Read or
+shell) — a newbie who peeked is tainted.
 
 ## Adding a member
 
@@ -99,7 +101,7 @@ the validator set. A member may not change these; when they must change, this pl
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
 
-- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
+- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `tests-kept`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
 
 ## Versioning

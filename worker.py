@@ -29,7 +29,7 @@ from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa
 HERE = Path(__file__).resolve().parent
 ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}}}
 POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns"}
-VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "explanation-kept")
+VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "tests-kept", "explanation-kept")
 
 
 def record_paths(target):
@@ -342,6 +342,16 @@ def validate(out, member, request, target, stream_text, host, before):
                 stray = [c for c in changed if c not in allowed and not c.startswith(("tests/", "test/"))]
                 if stray:
                     problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(stray[:8]))
+        elif name == "tests-kept":
+            # the request's `tests` are the contract's, as they were in the tree when the session started (committed or not):
+            # a build that changed one — or put it back to HEAD — decided its own verdict. Said here, at the end of this call,
+            # not later as checks failing against tests nobody meant
+            after = tree_state(target)
+            if before is not None and after is not None:
+                changed = [t for t in request.get("tests") or [] if before.get(t) != after.get(t)]
+                if changed:
+                    problems.append("tests-kept: changed the contract's protected tests (%s) — they are the contract as given, "
+                                    "uncommitted changes included; a test that contradicts the contract goes in `disputed-tests`" % ", ".join(changed))
         elif name == "explanation-kept":
             # a refactoring keeps what the program says about itself: no public name, docstring or comment present at HEAD is
             # gone from the tree. Counted over the whole project, since moving is the point. Only in the refactor domain;

@@ -4,6 +4,7 @@
   "max-turns": 40,
   "validate": [
     "checks-ran",
+    "tests-kept",
     "explanation-kept"
   ]
 }

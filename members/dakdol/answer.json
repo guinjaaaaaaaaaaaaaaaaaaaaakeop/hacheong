@@ -31,7 +31,8 @@
         ],
         "properties": {
           "check": {
-            "type": "string"
+            "type": "string",
+            "description": "one command line, copied exactly as you ran it — not a description of what you checked"
           },
           "exit": {
             "type": "integer"

@@ -93,6 +93,8 @@ def test_the_prompt_is_role_then_domain_section_then_request():
     assert prompt.index("# Where you run") < prompt.index("# Request")
     prompt, _ = w.assemble(w.load_member("sibi"), REQUEST, "code", host="claude")
     assert "with these tools only: Read,Grep,Glob" in prompt
+    # the builder runs what decides its change while it works, the full checks once at the end
+    assert "not the whole suite each time" in w.load_member("dakdol")["role"]
 
 
 def test_the_envelope_is_added_to_every_schema_and_bad_members_are_refused():

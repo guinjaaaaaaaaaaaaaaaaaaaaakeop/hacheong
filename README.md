@@ -34,8 +34,9 @@ The runner assembles the prompt — `members/<name>/ROLE.md` ⊕ `domains/<domai
 <member>` section) ⊕ the request — starts a fresh host session with the member's `policy.json` (tools, sandbox, turn
 budget) and `answer.json` as the enforced output schema, runs the member's validators over the answer and the
 session's transcript, and writes the answer atomically with `worker` (host, model, turns, cost, session, the
-transcript file kept next to it), `member` and `domain`. The domain comes from the request: `domain` if it says so,
-else the artifact's family (`produces: plan/…` → `plan`), else `code`.
+transcript file kept next to it). The domain comes from the request: `domain` if it says so, else the artifact's
+family (`produces: plan/…` → `plan`), else `code`. (The answer carried `member` and `domain` until 1.7.2; nothing read
+them — the runner named both when it asked.)
 
 Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims`
 — plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an

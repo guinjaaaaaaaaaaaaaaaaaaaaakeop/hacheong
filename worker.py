@@ -455,8 +455,7 @@ def main():
     before = tree_state(target)
     out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
     out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before)
-    out["member"] = member["name"]
-    out["domain"] = domain
+    # the answer used to carry `member` and `domain` too; no reader ever consulted them — the runner named both when it asked
     Path(args.response).parent.mkdir(parents=True, exist_ok=True)
     with open(args.response + ".tmp", "w", encoding="utf-8", newline="\n") as fh:   # LF on every host; the response is diffed and fingerprinted
         fh.write(json.dumps(out, ensure_ascii=False, indent=2) + "\n")

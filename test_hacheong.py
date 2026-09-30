@@ -229,6 +229,38 @@ def test_validators_fire_on_recorded_cases():
         os.remove(os.path.join(r.dir, "app.py"))
 
 
+def test_the_tests_guards_judge_this_member_not_the_tree():
+    """guin-site 2026-09-30: a tests worker failed only-tests-touched because the session was writing src/worker/auth.ts in
+    the same tree during the call (s4-tests); another failed red-before-build because an earlier build attempt was already
+    in the tree, so a correct new test could not fail (s2-tests-nobind). Both were dropped as not done, though they were."""
+    with Repo() as r:
+        teujip = w.load_member("teujip")
+        before = w.tree_state(r.dir)
+        r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        import app\n")
+        r.write("src_auth.py", "x = 1\n")   # the session's edit, during the call
+        ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_x.py"], "covers": [{"section": "Q-add", "tests": ["test_Q_add_appends"]}]}
+        mine = claude_stream(("Write", {"file_path": r.dir + "/tests/test_x.py"}), result=ans)
+        out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, mine, "claude-code", before)
+        assert out["status"] == "done" and any("by another hand" in n and "src_auth.py" in n for n in out["non-claims"]), out
+        # the member's own write outside the tests is still its own
+        theirs = claude_stream(("Write", {"file_path": r.dir + "/tests/test_x.py"}), ("Edit", {"file_path": r.dir + "/src_auth.py"}), result=ans)
+        out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, theirs, "claude-code", before)
+        assert out["status"] == "failed" and "changed outside the tests it declared: src_auth.py" in " ".join(out["non-claims"]), out
+        # no transcript: strict, as before
+        out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, "", "claude-code", before)
+        assert out["status"] == "failed", out
+        os.remove(os.path.join(r.dir, "src_auth.py"))
+        # red-before-build: code already changed before the call began — the test passing is not "decides nothing"
+        r.write("app.py", "x = 1\n")   # an earlier build attempt, uncommitted
+        before_built = w.tree_state(r.dir)
+        out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, mine, "claude-code", before_built)
+        assert out["status"] == "done" and any("red-before-build could not decide tests/test_x.py" in n and "app.py" in n for n in out["non-claims"]), out
+        # ...and with a clean tree it is still the failure it was
+        os.remove(os.path.join(r.dir, "app.py"))
+        out = w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, mine, "claude-code", w.tree_state(r.dir))
+        assert out["status"] == "done", "red: app is missing — the test fails before the build, as it should"
+
+
 def test_tests_kept_refuses_a_build_that_changed_the_contracts_tests_even_back_to_head():
     with Repo() as r:
         r.write("tests/test_x.py", "# first version\n")

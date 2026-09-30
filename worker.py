@@ -307,15 +307,28 @@ def transcript_commands(stream_text, host):
             it = d.get("item") or {}
             if d.get("type") == "item.completed" and it.get("type") == "command_execution":
                 cmds.append(it.get("command", ""))
+            elif d.get("type") == "item.completed" and it.get("type") == "file_change":   # apply_patch: the files it wrote
+                reads += [c.get("path", "") for c in it.get("changes") or [] if isinstance(c, dict)]
         elif d.get("type") == "assistant":
             for c in (d.get("message") or {}).get("content", []):
                 if c.get("type") == "tool_use":
                     inp = c.get("input") or {}
                     if c.get("name") == "Bash":
                         cmds.append(inp.get("command", ""))
-                    elif c.get("name") in ("Read", "Edit", "Write", "Glob", "Grep"):
+                    elif c.get("name") in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep"):
                         reads.append(inp.get("file_path") or inp.get("path") or inp.get("pattern") or "")
     return cmds, reads
+
+
+CODE_EXT = (".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".go", ".rs", ".rb", ".java", ".kt", ".swift", ".c", ".cc", ".cpp", ".h", ".sql", ".sh")
+
+
+def named_by(stream_text, host, path):
+    """Whether this member's own transcript names `path` — in a command it ran, or as a file it read, edited or wrote. A file
+    the transcript never names changed by another hand during the call (a session working the same tree)."""
+    cmds, touched = transcript_commands(stream_text, host)
+    base = path.replace("\\", "/")
+    return any(base in str(c) for c in cmds) or any(str(t).replace("\\", "/").endswith(base) for t in touched if t)
 
 
 def shell_tokens(command):
@@ -371,6 +384,10 @@ def validate(out, member, request, target, stream_text, host, before):
             # the request amends tests the build disputed (`amending`): the build already stands, and the corrected tests may pass
             if request.get("amending"):
                 continue
+            # code already changed and uncommitted when the call began — an earlier build attempt left in the tree — can make a
+            # correct new test pass before this slice's build; that is not the test deciding nothing (guin-site s2-tests-nobind)
+            built_before = sorted(p for p in (before or {}) if p.endswith(CODE_EXT) and not p.startswith(("tests/", "test/"))
+                                  and p not in (out.get("tests") or []))
             for t in out.get("tests") or []:
                 p = os.path.join(target, t)
                 if not os.path.exists(p):
@@ -378,7 +395,11 @@ def validate(out, member, request, target, stream_text, host, before):
                     continue
                 py = "python3" if shutil.which("python3") else "python"
                 done = subprocess.run([py, "-m", "unittest", t], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
-                if done.returncode == 0:
+                if done.returncode == 0 and built_before:
+                    out.setdefault("non-claims", []).append("red-before-build could not decide %s: it passes, and code was already changed "
+                                                            "before this call (%s) — an earlier build may be what it passes against"
+                                                            % (t, ", ".join(built_before[:6])))
+                elif done.returncode == 0:
                     problems.append("red-before-build: %s passes before the build — it decides nothing" % t)
         elif name == "only-tests-touched":
             after = tree_state(target)
@@ -386,8 +407,15 @@ def validate(out, member, request, target, stream_text, host, before):
                 changed = sorted(set(k for k in set(before) | set(after) if before.get(k) != after.get(k)))
                 allowed = set(out.get("tests") or [])
                 stray = [c for c in changed if c not in allowed and not c.startswith(("tests/", "test/"))]
-                if stray:
-                    problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(stray[:8]))
+                # judged by what this member did, not by what the tree did: a file its transcript never names was changed by another
+                # hand during the call (the session writing code beside a tests worker, guin-site s4-tests). No transcript: strict.
+                others = [c for c in stray if stream_text and not named_by(stream_text, host, c)]
+                mine = [c for c in stray if c not in others]
+                if mine:
+                    problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(mine[:8]))
+                if others:
+                    out.setdefault("non-claims", []).append("changed during the call by another hand (this member's transcript never names them), "
+                                                            "not held against it: %s" % ", ".join(others[:8]))
         elif name == "tests-kept":
             # the request's `tests` are the contract's, as they were in the tree when the session started (committed or not):
             # a build that changed one — or put it back to HEAD — decided its own verdict. Said here, at the end of this call,

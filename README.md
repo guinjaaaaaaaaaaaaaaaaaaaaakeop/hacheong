@@ -114,6 +114,12 @@ the validator set. A member may not change these; when they must change, this pl
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
 
+- **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
+  transcript names (a command it ran, a file it read, edited or wrote); a file changed during the call that the
+  transcript never names was another hand's — the session writing code beside a tests worker — and is said as a
+  non-claim, not held against it. No transcript: strict, as before. `red-before-build` cannot decide a test that passes
+  when code was already changed and uncommitted before the call began (an earlier build attempt): it says so instead of
+  failing the answer.
 - **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `tests-kept`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
 

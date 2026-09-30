@@ -28,7 +28,25 @@ from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa
 
 HERE = Path(__file__).resolve().parent
 ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}}}
-POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns"}
+POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns", "can"}
+# What a session this call starts can reach, by host, unless the member's policy says otherwise (`can`). A Codex sandbox has no
+# network and cannot bind a local port — guin-site, 2026-09-30: "로컬 TCP bind 권한 부족", "Wrangler가 … 127.0.0.1 포트를 차단":
+# five attempts blocked mid-task before the session did the builds itself. A Claude Code worker runs as the host does.
+CAPABILITIES = ("network", "loopback")
+HOST_CAN = {"codex": {"network": False, "loopback": False}, "claude": {"network": True, "loopback": True}}
+
+
+def capabilities(member, host):
+    """{capability: bool} for this member on this host: the host's default, overridden by the policy's `can`."""
+    can = dict(HOST_CAN.get(host, {c: False for c in CAPABILITIES}))
+    can.update({k: bool(v) for k, v in (member["policy"].get("can") or {}).items()})
+    return can
+
+
+def missing_needs(request, member, host):
+    """The request's `needs` this member cannot meet here — an unknown need counts as unmet (fail closed)."""
+    can = capabilities(member, host)
+    return [n for n in (request.get("needs") or []) if not can.get(n)]
 VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "tests-kept", "explanation-kept")
 
 
@@ -127,6 +145,9 @@ def load_member(name, target=None):
         policy = json.loads((d / "policy.json").read_text(encoding="utf-8")) if (d / "policy.json").exists() else {}
     except (OSError, ValueError) as err:
         raise SystemExit("member %s: %s" % (d.name, err))
+    bad_can = sorted(set(policy.get("can") or {}) - set(CAPABILITIES))
+    if bad_can:
+        raise SystemExit("member %s: policy.json `can` has unknown capabilities %s (known: %s)" % (d.name, bad_can, ", ".join(CAPABILITIES)))
     unknown = set(policy) - POLICY_KEYS
     if unknown:
         raise SystemExit("member %s: policy.json has unknown keys %s (known: %s)" % (d.name, sorted(unknown), sorted(POLICY_KEYS)))
@@ -190,6 +211,9 @@ def environment_text(member, host):
             lines.append("A Codex sandbox (`%s`)." % sandbox)
     else:
         lines.append("A Claude Code session with these tools only: %s." % (member["policy"].get("tools") or "Read,Grep,Glob"))
+    can = capabilities(member, "codex" if host == "codex" else "claude")
+    lines.append("Network: %s. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): %s."
+                 % ("yes" if can["network"] else "no", "yes" if can["loopback"] else "no"))
     lines.append("What the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not "
                  "yours to work around: stop with `status: blocked` and name it. Do not write by hand what a tool generates "
                  "(a lock file, a build output) and do not swap in another tool for the one the request names.")
@@ -452,9 +476,18 @@ def main():
     if args.prompt_only:
         print(prompt + "\n\n# Answer\n\nYour whole final message is one JSON object, nothing else, matching this schema:\n" + json.dumps(member["schema"]))
         return 0
-    before = tree_state(target)
-    out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
-    out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before)
+    # what the request needs and this member cannot do here is said before any call: a worker that learns it mid-task spends
+    # the call, and a runner that learns it from a blocked answer has already waited for it
+    lacking = missing_needs(request, member, args.host)
+    if lacking:
+        out = {"status": "blocked", "summary": "needs %s, which %s on %s cannot do" % (", ".join(lacking), member["name"], args.host),
+               "non-claims": ["not attempted: the request needs %s; %s on %s has %s — give the task to a member that has it, or to the session"
+                              % (", ".join(lacking), member["name"], args.host,
+                                 ", ".join("%s: %s" % (k, "yes" if v else "no") for k, v in capabilities(member, args.host).items()))]}
+    else:
+        before = tree_state(target)
+        out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
+        out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before)
     # the answer used to carry `member` and `domain` too; no reader ever consulted them — the runner named both when it asked
     Path(args.response).parent.mkdir(parents=True, exist_ok=True)
     with open(args.response + ".tmp", "w", encoding="utf-8", newline="\n") as fh:   # LF on every host; the response is diffed and fingerprinted

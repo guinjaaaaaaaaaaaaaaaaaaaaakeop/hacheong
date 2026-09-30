@@ -62,6 +62,11 @@ def cmd_roster(args):
     for m in members_in(HERE / "members"):
         first = (HERE / "members" / m / "ROLE.md").read_text(encoding="utf-8").split("\n", 1)[0].lstrip("# ").strip() if (HERE / "members" / m / "ROLE.md").exists() else "(no ROLE.md)"
         print("  %-10s role: %-9s %s" % (m, by_member.get(m, "-"), first))
+        try:
+            mem = worker.load_member(str(HERE / "members" / m))
+            print("  %-10s can — %s" % ("", "; ".join("%s: %s" % (h, ", ".join("%s %s" % (k, "yes" if v else "no") for k, v in worker.capabilities(mem, h).items())) for h in ("claude", "codex"))))
+        except SystemExit:
+            pass
     if args.target:
         local = Path(args.target) / "hacheong" / "members"
         if members_in(local):

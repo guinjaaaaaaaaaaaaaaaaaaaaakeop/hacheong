@@ -87,6 +87,13 @@ the validator set. A member may not change these; when they must change, this pl
 - The prompt says where the session runs (`# Where you run`): a Codex `workspace-write` sandbox has no network by default
   and a read-only `.git`; a Claude Code session has the member's tools only. What the work needs and that place lacks is
   `blocked`, named — never a hand-written lock file or another tool in the named one's place.
+- **What a member can do, and what a task needs.** Each host has a default — Codex: no network, no loopback (a Codex
+  sandbox cannot bind a local port: a local server, `wrangler dev`, a fake S3 on 127.0.0.1); Claude Code: both — and a
+  member's `policy.json` may say otherwise with `"can": {"network": true|false, "loopback": true|false}` (only those two
+  names; another is refused at load). The prompt states both. A request may carry `"needs": ["loopback", "network"]`
+  (chongdae passes a plan task's `needs`); a need the member cannot meet on this host — or one this runner does not know —
+  is answered `blocked` at once, with the reason in `non-claims` and no host call: give the task to a member that has it,
+  or to the session. `roster` shows each member's capabilities per host.
 - A member's session is a fresh process, but not an empty one: on Claude Code it receives the project's SessionStart
   modes (every enabled plugin's hook runs; `--setting-sources ""` does not keep them out, and the flag that would
   cannot stay logged in). A mode written for the person's session — "leave the code for the user to write" — reaches

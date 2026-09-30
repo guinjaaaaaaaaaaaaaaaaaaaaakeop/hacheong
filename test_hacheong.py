@@ -281,6 +281,44 @@ def test_prompt_only_prints_the_prompt_and_the_schema_without_a_host():
         assert done.returncode != 0
 
 
+def test_a_request_that_needs_what_the_sandbox_lacks_is_refused_before_any_call():
+    """guin-site, 2026-09-30: a fake S3 and `wrangler dev` need a local port; the Codex sandbox cannot bind one, and five
+    attempts were blocked mid-task before the session did the builds. A member now says what it can do (per host, overridable
+    in policy `can`), the prompt says it, and a request's `needs` it cannot meet is answered `blocked` without a host call."""
+    dakdol = w.load_member("dakdol")
+    assert w.capabilities(dakdol, "codex") == {"network": False, "loopback": False}
+    assert w.capabilities(dakdol, "claude") == {"network": True, "loopback": True}
+    assert w.missing_needs({"needs": ["loopback"]}, dakdol, "codex") == ["loopback"]
+    assert w.missing_needs({"needs": ["loopback"]}, dakdol, "claude") == []
+    assert w.missing_needs({"needs": ["gpu"]}, dakdol, "claude") == ["gpu"], "an unknown need fails closed"
+    assert w.missing_needs({}, dakdol, "codex") == []
+    prompt, _ = w.assemble(dakdol, dict(REQUEST), "code", None, "codex")
+    assert "Loopback — binding a local port" in prompt and "): no." in prompt, prompt[prompt.index("# Where you run"):][:600]
+    with Repo() as r:
+        # a policy may say more than the host's default — and only about capabilities this runner knows
+        d = os.path.join(r.dir, "members", "local")
+        shutil.copytree(os.path.join(HERE, "members", "dakdol"), d)
+        pol = json.load(open(os.path.join(d, "policy.json")))
+        json.dump(dict(pol, can={"loopback": True}), open(os.path.join(d, "policy.json"), "w"))
+        assert w.missing_needs({"needs": ["loopback"]}, w.load_member(d), "codex") == []
+        json.dump(dict(pol, can={"teleport": True}), open(os.path.join(d, "policy.json"), "w"))
+        try:
+            w.load_member(d)
+            raise AssertionError("an unknown capability must be refused")
+        except SystemExit as err:
+            assert "teleport" in str(err)
+        # end to end: codex host, a request that needs a port — blocked at once, with the reason, and no host was started
+        req = os.path.join(r.dir, "req.json")
+        json.dump(dict(REQUEST, target=r.dir, needs=["loopback"]), open(req, "w"))
+        resp = os.path.join(r.dir, "resp.json")
+        env = dict(os.environ, PATH="/nonexistent")   # no codex binary reachable: a call would fail, not block
+        done = subprocess.run([sys.executable, os.path.join(HERE, "worker.py"), "--member", "dakdol", "--request", req, "--response", resp, "--host", "codex"],
+                              capture_output=True, text=True, encoding="utf-8", env=env)
+        assert done.returncode == 0, done.stderr
+        out = json.load(open(resp))
+        assert out["status"] == "blocked" and "loopback" in out["summary"] and "not attempted" in out["non-claims"][0] and "worker" not in out, out
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

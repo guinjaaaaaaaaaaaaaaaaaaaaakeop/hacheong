@@ -24,6 +24,11 @@ REQUEST = {"artifact-type": "chongdae/request@1", "stage": "build", "run": "run-
 GOOD = {"status": "done", "summary": "added", "verified": [{"check": "python3 -m unittest tests/test_x.py -k Q_add", "exit": 0}], "decisions": [], "non-claims": []}
 
 
+def good(**fields):
+    """A fresh copy of GOOD: validate appends to the answer's lists, and a shallow copy shared them with every later test."""
+    return dict(json.loads(json.dumps(GOOD)), **fields)
+
+
 def stream(*events):
     return "\n".join(json.dumps(e) for e in events) + "\n"
 
@@ -167,24 +172,24 @@ def test_validators_fire_on_recorded_cases():
         # checks-ran: a check claimed verified must appear in the transcript; python vs python3 is not a difference
         dakdol = w.load_member("dakdol")
         ran = claude_stream(("Bash", {"command": "python -m unittest tests/test_x.py -k Q_add"}))
-        assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "done"
-        out = w.validate(dict(GOOD), dakdol, REQUEST, r.dir, claude_stream(("Bash", {"command": "ls"})), "claude-code", before)
+        assert w.validate(good(), dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "done"
+        out = w.validate(good(), dakdol, REQUEST, r.dir, claude_stream(("Bash", {"command": "ls"})), "claude-code", before)
         assert out["status"] == "failed" and "claimed verified but no such command" in out["non-claims"][0], out
         # a remark after the command ("(8 tests, OK)") cost a whole rebuild when seen live: it is not part of the command
-        remarked = dict(GOOD, verified=[{"check": "python3 -m unittest tests/test_x.py -k Q_add (8 tests, OK)", "exit": 0}])
+        remarked = good(verified=[{"check": "python3 -m unittest tests/test_x.py -k Q_add (8 tests, OK)", "exit": 0}])
         assert w.validate(remarked, dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "done"
         # the worker's own transcript lands in the run's record inside the target: not a tree change
         r.write(".chongdae/run-1/T1.quibble.response.transcript.jsonl", "{}\n")
         assert w.validate({"status": "done", "summary": "", "non-claims": [], "findings": []}, sibi, REQUEST, r.dir, "", "claude-code", before)["status"] == "done"
         # codex transcripts: command_execution items
         codex = stream({"type": "item.completed", "item": {"type": "command_execution", "command": "/bin/zsh -lc 'python3 -m unittest tests/test_x.py -k Q_add'"}})
-        assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, codex, "codex", before)["status"] == "done"
+        assert w.validate(good(), dakdol, REQUEST, r.dir, codex, "codex", before)["status"] == "done"
         # the same argv, quoted as it ran (zsh would glob the pattern) and reported unquoted: a true claim (seen live: failed three times)
         quoted = stream({"type": "item.completed", "item": {"type": "command_execution", "command": "/bin/zsh -lc \"python3 -m unittest discover -s tests -p 'test_s[12].py'\""}})
-        claim = dict(GOOD, verified=[{"check": "python3 -m unittest discover -s tests -p test_s[12].py", "exit": 0}])
+        claim = good(verified=[{"check": "python3 -m unittest discover -s tests -p test_s[12].py", "exit": 0}])
         assert w.validate(claim, dakdol, REQUEST, r.dir, quoted, "codex", before)["status"] == "done"
         # ...while a tidied rewrite of what ran is still not what ran
-        tidied = dict(GOOD, verified=[{"check": "python3 -m unittest discover -s tests -p test_s3.py", "exit": 0}])
+        tidied = good(verified=[{"check": "python3 -m unittest discover -s tests -p test_s3.py", "exit": 0}])
         assert w.validate(tidied, dakdol, REQUEST, r.dir, quoted, "codex", before)["status"] == "failed"
         # red-before-build and only-tests-touched: teujip's tests must fail now, and only tests may change
         teujip = w.load_member("teujip")
@@ -351,22 +356,6 @@ def test_a_request_that_needs_what_the_sandbox_lacks_is_refused_before_any_call(
         assert out["status"] == "blocked" and "loopback" in out["summary"] and "not attempted" in out["non-claims"][0] and "worker" not in out, out
 
 
-if __name__ == "__main__":
-    failed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_"):
-            try:
-                fn()
-                print("PASS", name)
-            except Skip as why:
-                print("SKIP", name, "--", why)
-            except (Exception, SystemExit) as err:   # a self-check that dies between tests lies by omission
-                failed += 1
-                print("FAIL", name, "--", "%s: %s" % (type(err).__name__, err))
-    print("all passed" if not failed else "%d failed" % failed)
-    sys.exit(1 if failed else 0)
-
-
 def test_explanation_kept_refuses_a_refactoring_that_dropped_its_words():
     """A site's split of build.py into five modules lost eleven docstrings and fifteen comments; the checks passed, the eyes
     accepted, a second task put them back. In the refactor domain the runner compares the project's Python inventory with
@@ -381,18 +370,18 @@ def test_explanation_kept_refuses_a_refactoring_that_dropped_its_words():
         # moved with its words: fine (the private helper may go)
         os.remove(os.path.join(r.dir, "app.py"))
         r.write("core/ops.py", '"""The app."""\n\n\ndef add(store, text):\n    """Append one item."""\n    # the id is the position\n    return len(store) + 1\n')
-        assert w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)["status"] == "done"
+        assert w.validate(good(), dakdol, refactor, r.dir, ran, "claude-code", None)["status"] == "done"
         # moved without its docstring and comment: refused, saying what shrank
         r.write("core/ops.py", '"""The app."""\n\n\ndef add(store, text):\n    return len(store) + 1\n')
-        out = w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)
+        out = w.validate(good(), dakdol, refactor, r.dir, ran, "claude-code", None)
         assert out["status"] == "failed" and out["validation"]["failed"] == ["explanation-kept"], out
         assert "docstrings 2 -> 1" in out["non-claims"][0] and "comment lines 1 -> 0" in out["non-claims"][0], out["non-claims"]
         # a public name gone: refused too
         r.write("core/ops.py", '"""The app."""\n\n\ndef append(store, text):\n    """Append one item."""\n    # the id is the position\n    return len(store) + 1\n')
-        out = w.validate(dict(GOOD), dakdol, refactor, r.dir, ran, "claude-code", None)
+        out = w.validate(good(), dakdol, refactor, r.dir, ran, "claude-code", None)
         assert out["status"] == "failed" and "public names gone: add" in out["non-claims"][0], out
         # the same tree in the code domain: a build may delete; nothing said
-        assert w.validate(dict(GOOD), dakdol, REQUEST, r.dir, ran, "claude-code", None)["status"] == "done"
+        assert w.validate(good(), dakdol, REQUEST, r.dir, ran, "claude-code", None)["status"] == "done"
 
 
 def test_the_tree_checks_leave_out_the_records_the_lock_declares():
@@ -409,3 +398,19 @@ def test_the_tree_checks_leave_out_the_records_the_lock_declares():
         r.write(".alpha/mod.py", "def hidden():\n    return 1\n")
         names, _, _ = w.inventory(r.dir, at_head=False)
         assert "hidden" not in names, names
+
+
+if __name__ == "__main__":
+    failed = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_"):
+            try:
+                fn()
+                print("PASS", name)
+            except Skip as why:
+                print("SKIP", name, "--", why)
+            except (Exception, SystemExit) as err:   # a self-check that dies between tests lies by omission
+                failed += 1
+                print("FAIL", name, "--", "%s: %s" % (type(err).__name__, err))
+    print("all passed" if not failed else "%d failed" % failed)
+    sys.exit(1 if failed else 0)

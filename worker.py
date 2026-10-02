@@ -278,12 +278,23 @@ def codex(prompt, member, args, target):
 
 def tree_state(target):
     """Every tracked-or-untracked file's hash, from git; None when the target is not a repository."""
-    done = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    done = subprocess.run(["git", "status", "--porcelain", "-z", "--untracked-files=all"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape")
     if done.returncode:
         return None
+    # -z: names unquoted (a Korean name is itself, not an octal escape), and a rename gives both sides — the old path is a change too
+    paths, parts, i = [], done.stdout.split("\0"), 0
+    while i < len(parts):
+        entry = parts[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" or entry[1] in "RC":
+            if i < len(parts) and parts[i]:
+                paths.append(parts[i])
+            i += 1
     state = {}
-    for line in done.stdout.splitlines():
-        path = line[3:].split(" -> ")[-1].strip().strip('"')
+    for path in paths:
         if "__pycache__" in path or path.endswith((".pyc", ".DS_Store")):   # what interpreters and the OS leave behind is not a change
             continue
         if path.startswith(record_paths(target)):   # the run's record — where this worker's own transcript lands — and the other products' are not the project

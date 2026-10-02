@@ -400,6 +400,17 @@ def test_the_tree_checks_leave_out_the_records_the_lock_declares():
         assert "hidden" not in names, names
 
 
+def test_tree_state_sees_both_sides_of_a_move_and_a_korean_name_as_itself():
+    with Repo() as r:
+        r.write("a.py", "x = 1\n")
+        r.write("글.md", "가\n")
+        subprocess.run(["git", "add", "-A"], cwd=r.dir); subprocess.run(["git", "commit", "-qm", "base"], cwd=r.dir)
+        subprocess.run(["git", "mv", "a.py", "b.py"], cwd=r.dir, check=True)
+        r.write("글.md", "나\n")
+        state = w.tree_state(r.dir)
+        assert state.get("a.py") == "gone" and "b.py" in state and "글.md" in state, state
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

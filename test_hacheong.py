@@ -110,7 +110,8 @@ def test_the_envelope_is_added_to_every_schema_and_bad_members_are_refused():
         open(os.path.join(m, "answer.json"), "w").write(json.dumps({"properties": {"findings": {"type": "array"}}, "required": ["findings"]}))
         mem = w.load_member(m)
         assert mem["schema"]["type"] == "object" and mem["schema"]["additionalProperties"] is False
-        assert set(mem["schema"]["required"]) == {"findings", "status", "summary", "non-claims"} and mem["schema"]["properties"]["status"]["enum"] == ["done", "blocked", "failed"]
+        assert set(mem["schema"]["required"]) == {"findings", "status", "summary", "non-claims", "lacked"} and mem["schema"]["properties"]["status"]["enum"] == ["done", "blocked", "failed"]
+        assert mem["schema"]["properties"]["lacked"]["items"]["enum"] == ["network", "loopback"]
         open(os.path.join(m, "policy.json"), "w").write(json.dumps({"tools": "Read", "validate": ["telepathy"]}))
         try:
             w.load_member(m); assert False
@@ -409,6 +410,131 @@ def test_tree_state_sees_both_sides_of_a_move_and_a_korean_name_as_itself():
         r.write("글.md", "나\n")
         state = w.tree_state(r.dir)
         assert state.get("a.py") == "gone" and "b.py" in state and "글.md" in state, state
+
+
+# Recorded from guin-site's codex workers (.chongdae, 2026-09-30): what a sandbox's refusal looks like in a command's output.
+WRANGLER_LISTEN = ("🌀 Executing on local database guin (e1a3e9b2) from .worker-persist/v3/d1:\n"
+                   "✘ [ERROR] Failed to write to log file Error: EPERM: operation not permitted, open '/Users/u/Library/Preferences/.wrangler/logs/wrangler.log'\n"
+                   "✘ [ERROR] A permission error occurred while accessing the file system.\n\n"
+                   "  Error: listen EPERM: operation not permitted 127.0.0.1\n\n"
+                   "  This is typically caused by:\n    - Insufficient file or directory permissions\n")
+PY_BIND = ('  File "/opt/homebrew/lib/python3.12/socketserver.py", line 478, in server_bind\n'
+           "    self.socket.bind(self.server_address)\n"
+           "PermissionError: [Errno 1] Operation not permitted\n\nFAILED (errors=2)\n")
+NPM_OFFLINE = ("npm error code ENOTFOUND\nnpm error syscall getaddrinfo\nnpm error errno ENOTFOUND\n"
+               "npm error network request to https://registry.npmjs.org/aws4fetch failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org\n"
+               "npm error network This is a problem related to network connectivity.\n")
+LOCAL_FAIL = ("git: error: couldn't create cache file '/tmp/xcrun_db-OHjAeqK2' (errno=Operation not permitted)\n"
+              "✘ [ERROR] Failed to write to log file Error: EPERM: operation not permitted, open '/Users/u/Library/Preferences/.wrangler/logs/w.log'\n"
+              "PermissionError: [Errno 1] Operation not permitted: '/Users/u/site/.test-cache/state.json'\n"
+              "AssertionError: False is not true : worker/backup.mjs is missing\n\nFAILED (failures=9)\n")
+
+
+def codex_stream(*runs):
+    """A codex `--json` stream: one completed command_execution per (command, output, exit)."""
+    return stream(*[{"type": "item.completed", "item": {"id": "item_%d" % i, "type": "command_execution", "command": "/bin/zsh -lc %s" % json.dumps(c),
+                                                         "aggregated_output": o, "exit_code": x, "status": "completed" if x == 0 else "failed"}}
+                    for i, (c, o, x) in enumerate(runs)])
+
+
+def claude_bash_stream(*runs):
+    """A Claude Code stream-json: each Bash tool_use answered by its tool_result."""
+    evs = []
+    for i, (c, o) in enumerate(runs):
+        evs.append({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_%d" % i, "name": "Bash", "input": {"command": c}}]}})
+        evs.append({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_%d" % i, "is_error": True,
+                                                             "content": [{"type": "text", "text": "Exit code 1\n" + o}]}]}})
+    return stream(*evs)
+
+
+def test_a_sandbox_refusal_mid_task_is_said_as_lacked_not_left_to_prose():
+    """guin-site, 2026-10-02: 트집 on codex wrote four tests, could not run test_worker_files (`wrangler dev` needs a local
+    port) and said so in Korean prose under `blocked`; chongdae read it as a decision the contract did not give. A task that
+    did not declare `needs` learns it mid-task — now the runner reads the refusal off the command's output and says it."""
+    teujip = w.load_member("teujip")
+    req = dict(REQUEST, role="nitpick", checks=[], tests=["tests/test_worker_files.py"])
+    # loopback, codex: wrangler's `listen EPERM` while running one of its own tests, answered `done` -> blocked
+    s = codex_stream(("python3 -m py_compile tests/test_worker_files.py", "", 0),
+                     ("python3 -m unittest discover -s tests -p test_worker_files.py", WRANGLER_LISTEN, 1))
+    out = w.mark_lacked(good(tests=["tests/test_worker_files.py"]), teujip, req, s, "codex")
+    claim = [n for n in out["non-claims"] if n.startswith("sandbox lacked: ")]
+    assert out["lacked"] == ["loopback"] and out["status"] == "blocked", out
+    assert len(claim) == 1 and "loopback" in claim[0] and "codex" in claim[0] and "listen EPERM: operation not permitted 127.0.0.1" in claim[0] \
+        and "test_worker_files.py" in claim[0], claim
+    # the same through Python's http.server (a fake S3): a refused socket.bind; a member that said `blocked` stays blocked
+    out = w.mark_lacked(good(status="blocked"), teujip, dict(REQUEST, checks=[["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_backup.py"]]),
+                        codex_stream(("python3 -m unittest discover -s tests -p test_backup.py", PY_BIND, 1)), "codex")
+    assert out["lacked"] == ["loopback"] and out["status"] == "blocked" and "PermissionError: [Errno 1]" in out["non-claims"][-1], out
+    # network, codex: npm cannot resolve the registry. Not one of its checks: `done` stays done, the lack is still said
+    dakdol = w.load_member("dakdol")
+    out = w.mark_lacked(good(), dakdol, dict(REQUEST), codex_stream(("npm install aws4fetch@1.0.20 --save-exact --ignore-scripts", NPM_OFFLINE, 1),
+                                                                    ("python3 -m unittest tests/test_x.py -k Q_add", "OK\n", 0)), "codex")
+    assert out["lacked"] == ["network"] and out["status"] == "done", out
+    assert out["non-claims"][-1].startswith("sandbox lacked: network") and "getaddrinfo ENOTFOUND registry.npmjs.org" in out["non-claims"][-1], out
+    # network, claude format, on a member whose policy says it has none: curl cannot resolve a host
+    with Repo() as r:
+        d = os.path.join(r.dir, "members", "offline")
+        shutil.copytree(os.path.join(HERE, "members", "dakdol"), d)
+        pol = json.load(open(os.path.join(d, "policy.json")))
+        json.dump(dict(pol, can={"network": False}), open(os.path.join(d, "policy.json"), "w"))
+        offline = w.load_member(d)
+        s = claude_bash_stream(("curl -L --fail --max-time 15 https://d2fltix0v2e0sb.cloudfront.net/dev-badge.svg",
+                                "curl: (6) Could not resolve host: d2fltix0v2e0sb.cloudfront.net"))
+        out = w.mark_lacked(good(), offline, dict(REQUEST), s, "claude")
+        assert out["lacked"] == ["network"] and "Could not resolve host: d2fltix0v2e0sb.cloudfront.net" in out["non-claims"][-1], out
+
+
+def test_a_local_failure_or_a_host_that_can_is_left_alone():
+    teujip = w.load_member("teujip")
+    # a test that failed on its own — and EPERM on a file (xcrun's cache, wrangler's log, a cache file): not a missing capability
+    out = w.mark_lacked(good(), teujip, dict(REQUEST), codex_stream(("python3 -m unittest tests/test_x.py -k Q_add", LOCAL_FAIL, 1)), "codex")
+    assert "lacked" not in out and out["status"] == "done" and out["non-claims"] == [], out
+    # a refusal printed by a reader (the member read a log or a test that quotes one) is a file's text, not a refusal
+    out = w.mark_lacked(good(), teujip, dict(REQUEST), codex_stream(("sed -n '1,80p' tests/test_worker_files.py", WRANGLER_LISTEN + NPM_OFFLINE, 0)), "codex")
+    assert "lacked" not in out, out
+    # Claude Code can bind and reach the network: the same refusal there is the program's own failure, not the sandbox's
+    s = claude_bash_stream(("python3 -m unittest discover -s tests -p test_worker_files.py", WRANGLER_LISTEN),
+                           ("npm install aws4fetch@1.0.20", NPM_OFFLINE))
+    assert w.transcript_runs(s, "claude-code")[0][0].startswith("python3 -m unittest"), "the claude stream pairs a command with its output"
+    out = w.mark_lacked(good(), teujip, dict(REQUEST), s, "claude")
+    assert "lacked" not in out and out["status"] == "done", out
+    # and a member whose policy grants loopback on codex is not flagged for it either
+    with Repo() as r:
+        d = os.path.join(r.dir, "members", "local")
+        shutil.copytree(os.path.join(HERE, "members", "teujip"), d)
+        pol = json.load(open(os.path.join(d, "policy.json")))
+        json.dump(dict(pol, can={"loopback": True}), open(os.path.join(d, "policy.json"), "w"))
+        out = w.mark_lacked(good(), w.load_member(d), dict(REQUEST), codex_stream(("python3 -m unittest tests/test_x.py", WRANGLER_LISTEN, 1)), "codex")
+        assert "lacked" not in out, out
+
+
+def test_a_member_that_says_what_it_lacked_is_heard_without_a_transcript_to_show_it():
+    """guin-site, 2026-10-02 itself: 트집 never ran test_worker_files — the prompt had told it there is no loopback — and said
+    so only in prose. Now the prompt asks for `lacked`, and the runner takes the member's word for it, named as its word."""
+    teujip = w.load_member("teujip")
+    prompt, _ = w.assemble(teujip, dict(REQUEST), "code", None, "codex")
+    assert "list it in `lacked`" in prompt and "not only in prose" in prompt, prompt[prompt.index("# Where you run"):][:900]
+    req = dict(REQUEST, role="nitpick", checks=[], tests=["tests/test_worker_files.py"])
+    skipped = codex_stream(("python3 -m py_compile tests/test_worker_files.py", "", 0),
+                           ("python3 -m unittest discover -s tests -p test_menu.py", LOCAL_FAIL, 1))   # never runs the worker test
+    for said in ("blocked", "done"):   # `done` while listing a lack is work it did not do
+        out = w.mark_lacked(good(status=said, lacked=["loopback"], summary="Worker 테스트는 루프백 포트 제한으로 실행하지 못했습니다."),
+                            teujip, req, skipped, "codex")
+        claim = [n for n in out["non-claims"] if n.startswith("sandbox lacked: ")]
+        assert out["status"] == "blocked" and out["lacked"] == ["loopback"], out
+        assert len(claim) == 1 and "loopback" in claim[0] and "the member's word" in claim[0] and "codex" in claim[0], claim
+    # said and observed: one non-claim, the observed one
+    out = w.mark_lacked(good(status="blocked", lacked=["loopback"]), teujip, req,
+                        codex_stream(("python3 -m unittest discover -s tests -p test_worker_files.py", WRANGLER_LISTEN, 1)), "codex")
+    assert out["lacked"] == ["loopback"] and len([n for n in out["non-claims"] if n.startswith("sandbox lacked: ")]) == 1 \
+        and "listen EPERM" in out["non-claims"][-1], out
+    # merged: the member says network, the transcript shows loopback
+    out = w.mark_lacked(good(status="blocked", lacked=["network"]), teujip, req,
+                        codex_stream(("python3 -m unittest discover -s tests -p test_worker_files.py", WRANGLER_LISTEN, 1)), "codex")
+    assert out["lacked"] == ["loopback", "network"], out
+    # nothing lacked: `[]` is said as no field, and `done` stays done
+    out = w.mark_lacked(good(lacked=[]), teujip, req, skipped, "codex")
+    assert "lacked" not in out and out["status"] == "done" and out["non-claims"] == [], out
 
 
 if __name__ == "__main__":

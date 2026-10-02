@@ -38,8 +38,9 @@ transcript file kept next to it). The domain comes from the request: `domain` if
 family (`produces: plan/…` → `plan`), else `code`. (The answer carried `member` and `domain` until 1.7.2; nothing read
 them — the runner named both when it asked.)
 
-Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims`
-— plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an
+Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims`,
+and `lacked` (`network` | `loopback`: what the place it ran lacked; listed in the schema's `required` because Codex's
+output schema is strict, but `[]` is written out as no field) — plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an
 answer that broke its own rules is not an answer.
 
 `--prompt-only` prints the exact prompt instead of calling a host — for a session that dispatches its host's own
@@ -94,6 +95,20 @@ the validator set. A member may not change these; when they must change, this pl
   (chongdae passes a plan task's `needs`); a need the member cannot meet on this host — or one this runner does not know —
   is answered `blocked` at once, with the reason in `non-claims` and no host call: give the task to a member that has it,
   or to the session. `roster` shows each member's capabilities per host.
+- **A lack found mid-task is said as one.** A task that did not declare `needs` learns it during the call. After the
+  call the runner reads each shell command's output in the session's stream (codex `command_execution`, Claude Code
+  Bash `tool_result`) for a refusal of a capability this member lacks on this host — loopback: `listen EPERM`/`EACCES`
+  (wrangler, workerd), `connect EPERM 127.0.0.1`, a Python `PermissionError: [Errno 1] Operation not permitted` right
+  after a `.bind(`/`.listen(`; network: `getaddrinfo ENOTFOUND <host>` (npm), `Could not resolve host:` (curl, git),
+  `Temporary failure in name resolution`, `nodename nor servname provided`, `Network is unreachable`. It adds
+  `"lacked": ["loopback"|"network"]` and a non-claim starting `sandbox lacked: ` naming the capability, the member, the
+  host, the command and the quoted line — chongdae routes it as a hiring stop, not as a decision the contract left open.
+  The status is the member's, except `done` becomes `blocked` when the refused command was part of its job (a request
+  check, a `verified` check, one of its tests). Conservative: an EPERM on a file (a log, a cache, a temp file), a test
+  that simply failed, text printed by a reader (`cat`, `sed`, `rg` …), and anything on a host that has the capability are
+  left alone. A member that never ran the command — the prompt told it there is no port — says so itself: the prompt asks
+  for `lacked`, not only prose, and the runner merges the member's `lacked` with what the transcript shows, adding the
+  same `sandbox lacked: ` non-claim named as the member's word, not observed (`done` with a `lacked` is `blocked`).
 - A member's session is a fresh process, but not an empty one: on Claude Code it receives the project's SessionStart
   modes (every enabled plugin's hook runs; `--setting-sources ""` does not keep them out, and the flag that would
   cannot stay logged in). A mode written for the person's session — "leave the code for the user to write" — reaches
@@ -135,4 +150,5 @@ changes shape.
 
 `python3 test_hacheong.py` — members load and assemble, the host stream parses into an answer and nothing short of a
 real one is `done`, each validator fires on a recorded case, project-local members and domains shadow the plugin's,
-`new` scaffolds something `check` refuses until it is written. No model calls.
+`new` scaffolds something `check` refuses until it is written, a sandbox's refusal recorded in a codex or Claude Code
+stream is said as `lacked` (and a local failure, or a host that can, is not). No model calls.

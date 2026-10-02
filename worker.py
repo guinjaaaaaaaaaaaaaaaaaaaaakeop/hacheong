@@ -13,6 +13,8 @@ the member's own fields, plus `worker` (host, model, turns, cost, session, trans
 refrain from is enforced here after the fact by named validators (a quote for every finding, a tree it was not allowed to
 change, a check it claims to have run, a test that must be red before the build, a README-only reader): a validator that
 fails turns the answer into `status: failed` with the reason in `non-claims`. Nothing short of a validated answer is done.
+A command whose output shows the sandbox refusing what this member lacks on this host (a local port, the network) adds
+`lacked` and a non-claim starting `sandbox lacked: ` — a hiring question, not the member's decision.
 """
 import argparse
 import hashlib
@@ -27,13 +29,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa: E402  (vendored: the same file in each plugin of this family)
 
 HERE = Path(__file__).resolve().parent
-ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}}}
 POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns", "can"}
 # What a session this call starts can reach, by host, unless the member's policy says otherwise (`can`). A Codex sandbox has no
 # network and cannot bind a local port — guin-site, 2026-09-30: "로컬 TCP bind 권한 부족", "Wrangler가 … 127.0.0.1 포트를 차단":
 # five attempts blocked mid-task before the session did the builds itself. A Claude Code worker runs as the host does.
 CAPABILITIES = ("network", "loopback")
 HOST_CAN = {"codex": {"network": False, "loopback": False}, "claude": {"network": True, "loopback": True}}
+# `lacked` is the member's own word for what this place lacked (empty: nothing). Optional in meaning — an empty list is said
+# as no `lacked` at all — but listed in `required`: Codex's output schema is strict, and a property it does not require fails
+ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}},
+            "lacked": {"type": "array", "items": {"enum": list(CAPABILITIES)}}}
 
 
 def capabilities(member, host):
@@ -215,7 +220,9 @@ def environment_text(member, host):
     lines.append("Network: %s. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): %s."
                  % ("yes" if can["network"] else "no", "yes" if can["loopback"] else "no"))
     lines.append("What the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not "
-                 "yours to work around: stop with `status: blocked` and name it. Do not write by hand what a tool generates "
+                 "yours to work around: stop with `status: blocked` and name it. When it is the network or loopback, list it in "
+                 "`lacked` (`[\"loopback\"]`, `[\"network\"]`), not only in prose — the runner reads `lacked`, not your sentences; "
+                 "nothing lacked: `lacked: []`. Do not write by hand what a tool generates "
                  "(a lock file, a build output) and do not swap in another tool for the one the request names.")
     return "\n".join(lines)
 
@@ -329,6 +336,128 @@ def transcript_commands(stream_text, host):
                     elif c.get("name") in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep"):
                         reads.append(inp.get("file_path") or inp.get("path") or inp.get("pattern") or "")
     return cmds, reads
+
+
+def transcript_runs(stream_text, host):
+    """(command, output) for every shell command the session ran, from its stream: codex's `command_execution` items carry
+    both; Claude Code's Bash `tool_use` is answered by a `tool_result` (paired by id, else by order)."""
+    runs, pending = [], {}
+    for line in (stream_text or "").split("\n"):
+        try:
+            d = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if host == "codex":
+            it = d.get("item") or {}
+            if d.get("type") == "item.completed" and it.get("type") == "command_execution":
+                runs.append((it.get("command", ""), it.get("aggregated_output") or ""))
+            continue
+        msg = d.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        for c in content if isinstance(content, list) else []:
+            if not isinstance(c, dict):
+                continue
+            if d.get("type") == "assistant" and c.get("type") == "tool_use" and c.get("name") == "Bash":
+                pending[c.get("id") or len(pending)] = (c.get("input") or {}).get("command", "")
+            elif d.get("type") == "user" and c.get("type") == "tool_result" and pending:
+                key = c.get("tool_use_id") if c.get("tool_use_id") in pending else next(iter(pending))
+                body = c.get("content")
+                if isinstance(body, list):
+                    body = "\n".join(str(x.get("text", "")) for x in body if isinstance(x, dict))
+                runs.append((pending.pop(key), str(body or "")))
+    return runs
+
+
+# What a sandbox's refusal looks like in a command's output — each pattern seen in a real worker transcript (guin-site
+# .chongdae, 2026-09): wrangler/workerd (`wrangler dev`, `wrangler d1 execute --local`) refused a port; Python's
+# http.server for a fake S3 refused `socket.bind`; npm and curl could not resolve a registry or a host. Only a refusal to
+# bind or listen counts — the same sandbox also refuses writes outside the tree ("EPERM: operation not permitted, open
+# '…/.wrangler/logs/…'", xcrun's cache, a temp file), and those are not a missing capability this runner knows.
+LOOPBACK_DENIED = (
+    re.compile(r"\b(?:listen|bind) (?:EPERM|EACCES)\b[^\n]*"),                        # node: "Error: listen EPERM: operation not permitted 127.0.0.1"
+    re.compile(r"\bconnect (?:EPERM|EACCES) (?:127\.\d+\.\d+\.\d+|::1|localhost)\b[^\n]*"),
+)
+PY_SOCKET_DENIED = re.compile(r"^\s*(?:PermissionError|OSError|socket\.error): \[Errno (?:1|13)\] (?:Operation not permitted|Permission denied)\s*$")
+PY_SOCKET_CALL = re.compile(r"\.(?:bind|listen)\(|\bserver_(?:bind|activate)\(")
+NETWORK_DENIED = (
+    re.compile(r"\bgetaddrinfo (?:ENOTFOUND|EAI_AGAIN) (?!localhost\b|127\.)\S+"),    # npm: "… reason: getaddrinfo ENOTFOUND registry.npmjs.org"
+    re.compile(r"\bCould not resolve host: (?!localhost\b|127\.)\S+"),                 # curl, git: "curl: (6) Could not resolve host: d2fl….cloudfront.net"
+    re.compile(r"Temporary failure in name resolution|nodename nor servname provided, or not known"),   # urllib, pip, requests
+    re.compile(r"\bconnect ENETUNREACH\b[^\n]*|\bNetwork is unreachable\b"),
+)
+READERS = {"cat", "sed", "nl", "head", "tail", "less", "more", "rg", "grep", "egrep", "awk", "find", "ls", "jq", "wc", "diff", "printf", "echo"}
+
+
+def denial_in(output):
+    """{capability: the line that shows the sandbox refused it} for one command's output."""
+    found = {}
+    lines = output.split("\n")
+    for i, ln in enumerate(lines):
+        if "loopback" not in found:
+            m = next((p.search(ln) for p in LOOPBACK_DENIED if p.search(ln)), None)
+            if m:
+                found["loopback"] = m.group(0).strip()
+            elif PY_SOCKET_DENIED.match(ln) and any(PY_SOCKET_CALL.search(p) for p in lines[max(0, i - 6):i]):
+                found["loopback"] = ln.strip()   # a socket refused, not a file: the error line ends without a path
+        if "network" not in found:
+            m = next((p.search(ln) for p in NETWORK_DENIED if p.search(ln)), None)
+            if m:
+                found["network"] = m.group(0).strip()
+    return found
+
+
+def sandbox_denials(stream_text, host, can):
+    """{capability: (command, quoted line)} — the first command whose own output shows the sandbox refusing a capability
+    this member lacks on this host (`can`, from capabilities()). A capability it has is never flagged: a refusal there is
+    the program's own failure. A command that only prints text (cat, sed, rg …) shows a file, not a refusal."""
+    found = {}
+    for command, output in transcript_runs(stream_text, host):
+        toks = shell_tokens(command)
+        if toks and os.path.basename(toks[0]) in READERS:
+            continue
+        for cap, line in denial_in(output).items():
+            if not can.get(cap, True) and cap not in found:
+                found[cap] = (command, line)
+    return found
+
+
+def mark_lacked(out, member, request, stream_text, host):
+    """After the call: what the member hit mid-task that its sandbox lacks goes into the answer as `lacked` and a non-claim
+    starting `sandbox lacked: ` — a hiring question for the runner, not a decision the contract left open. The status is the
+    member's, unless it said `done` while a refused command was part of its job (a request check, a check it reports in
+    `verified`, one of its tests) or while listing a lack itself: then it is `blocked`. The member's own `lacked` is merged
+    with what the transcript shows; one only it says is named as its word, not as observed."""
+    denied = sandbox_denials(stream_text, host, capabilities(member, host))
+    said = [c for c in out.get("lacked") or [] if c in CAPABILITIES]   # the member's own word, from the prompt's `# Where you run`
+    if not denied and not said:
+        out.pop("lacked", None)   # `[]` is nothing lacked: said as no field, so a reader tests one thing
+        return out
+    job = [shell_tokens(" ".join(c) if isinstance(c, list) else str(c)) for c in request.get("checks") or []]
+    job += [shell_tokens(re.sub(r"\s*\(.*\)\s*$", "", str((v or {}).get("check", "")))) for v in out.get("verified") or [] if isinstance(v, dict)]
+    tests = [str(t) for t in (request.get("tests") or []) + (out.get("tests") or []) if isinstance(t, str)]
+    names = {n for t in tests for n in (t, os.path.basename(t), os.path.splitext(os.path.basename(t))[0])}
+    in_job = False
+    for cap in sorted(denied):
+        command, line = denied[cap]
+        ran = shell_tokens(command)
+        if any(j and (contains(ran, j) or (len(j) > 1 and contains(ran, j[1:]))) for j in job) or any(
+                n and n in tok for n in names for tok in ran):
+            in_job = True
+        out.setdefault("non-claims", []).append(
+            "sandbox lacked: %s — %s on %s cannot %s; `%s` failed with \"%s\" — give it to a member that can, or to the session"
+            % (cap, member["name"], host, "bind a local port" if cap == "loopback" else "reach the network",
+               " ".join(ran)[:200], line[:200]))
+    for cap in sorted(set(said) - set(denied)):
+        out.setdefault("non-claims", []).append(
+            "sandbox lacked: %s — %s on %s says it cannot %s (the member's word in `lacked`, not observed in its transcript) — "
+            "give it to a member that can, or to the session"
+            % (cap, member["name"], host, "bind a local port" if cap == "loopback" else "reach the network"))
+    out["lacked"] = sorted(set(said) | set(denied))
+    if out.get("status") == "done" and (in_job or said):   # what it says it lacked was work it did not do
+        out["status"] = "blocked"
+    return out
 
 
 CODE_EXT = (".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".go", ".rs", ".rb", ".java", ".kt", ".swift", ".c", ".cc", ".cpp", ".h", ".sql", ".sh")
@@ -527,6 +656,8 @@ def main():
         before = tree_state(target)
         out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
         out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before)
+        # a task that did not declare `needs` learns it mid-task: the refusal in a command's output is said as such
+        out = mark_lacked(out, member, request, stream, args.host)
     # the answer used to carry `member` and `domain` too; no reader ever consulted them — the runner named both when it asked
     Path(args.response).parent.mkdir(parents=True, exist_ok=True)
     with open(args.response + ".tmp", "w", encoding="utf-8", newline="\n") as fh:   # LF on every host; the response is diffed and fingerprinted

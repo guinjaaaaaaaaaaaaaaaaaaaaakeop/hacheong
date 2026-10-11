@@ -35,7 +35,10 @@ The runner assembles the prompt — `members/<name>/ROLE.md` ⊕ `domains/<domai
 budget) and `answer.json` as the enforced output schema, runs the member's validators over the answer and the
 session's transcript, and writes the answer atomically with `worker` (host, model, turns, cost, session, the
 transcript file kept next to it). The domain comes from the request: `domain` if it says so, else the artifact's
-family (`produces: plan/…` → `plan`), else `code`. (The answer carried `member` and `domain` until 1.7.2; nothing read
+family (`produces: plan/…` → `plan`), else `code`. A claude session that stops at its turn budget (`error_max_turns`) is
+followed by up to two more (`HACHEONG_CONTINUATIONS`, 0 or more; not a number reads as 2), each told the earlier one ran out and to continue from the tree; the
+validators read all their commands, the answer is the last one's, and `worker` adds `continued` with the turns and cost
+summed. (The answer carried `member` and `domain` until 1.7.2; nothing read
 them — the runner named both when it asked.)
 
 Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims`,
@@ -50,7 +53,9 @@ subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer
 
 `quotes-required:<collection>.<field>` every item carries a non-empty quote · `no-tree-changes` the tree is as it was
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
-quoting is not a difference) · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing
+quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
+the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing
 changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
 uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.

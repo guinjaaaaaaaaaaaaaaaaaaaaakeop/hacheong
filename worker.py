@@ -9,7 +9,8 @@ A member is a directory, not code: `ROLE.md` (the disposition, as sentences), `a
 A name resolves to `members/<name>` here, a project's `hacheong/members/<name>` first; a path with a slash is used as is.
 
 The answer always carries the envelope every runner reads — `status` (done|blocked|failed), `summary`, `non-claims` — plus
-the member's own fields, plus `worker` (host, model, turns, cost, session, transcript). What a model cannot be asked to
+the member's own fields, plus `worker` (host, model, turns, cost, session, transcript; `continued` when a claude session ran
+out of turns and the call went on in another, told to continue from the tree). What a model cannot be asked to
 refrain from is enforced here after the fact by named validators (a quote for every finding, a tree it was not allowed to
 change, a check it claims to have run, a test that must be red before the build, a README-only reader): a validator that
 fails turns the answer into `status: failed` with the reason in `non-claims`. Nothing short of a validated answer is done.
@@ -241,6 +242,17 @@ def assemble(member, request, domain, target=None, host=None):
 
 # ---------------------------------------------------------------- host adapters (the same on every member)
 
+def continuations(value):
+    """HACHEONG_CONTINUATIONS as a count: sessions after one that ran out of turns, before a stop is reported (2 when unset
+    or not a number; never below 0 — the first session always runs)."""
+    try:
+        return max(0, int(str(value).strip()))
+    except ValueError:
+        return 2
+
+
+CONTINUATIONS = continuations(os.environ.get("HACHEONG_CONTINUATIONS", 2))
+
 def failed(summary, why, schema=None):
     return {"status": "failed", "summary": summary, "non-claims": [why]}
 
@@ -260,12 +272,48 @@ def parse_claude(returncode, stdout, stderr):
     return out
 
 
+def results(stdout):
+    """The `result` events of a claude stream, in order — one per session in it."""
+    found = []
+    for line in (stdout or "").split("\n"):
+        try:
+            event = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            found.append(event)
+    return found
+
+
+def continuation(prompt, max_turns, n):
+    return prompt + ("\n\n# Continuing (session %d)\n\nAn earlier session on this same request used all its %d turns before it answered. "
+                     "Whatever it changed is in the tree now (`git status`, `git diff` show it); nothing else of it reaches you. "
+                     "Continue from there — do not redo what is done, do not undo it unless it is wrong — and answer as the request asks." % (n + 1, max_turns))
+
+
 def claude(prompt, member, args, target):
+    """One host session; when it stops at the turn ceiling (`error_max_turns`), up to CONTINUATIONS more, each told to continue
+    from the tree — what a session did by hand every time a claude-host worker ran out of turns (guin-site: six times in one
+    cycle, each `retry … "트리에서 이어"`, each finishing). The streams are kept as one: the validators read every command any of
+    them ran, and the answer is the last session's."""
     tools = member["policy"].get("tools", "Read,Grep,Glob")
-    code, stdout, stderr = run_claude(prompt, member["schema"], cwd=target, add_dirs=[target], tools=tools, model=args.model, effort=args.effort, max_turns=args.max_turns, bypass=True)
+    streams, ask = [], prompt
+    for n in range(1 + CONTINUATIONS):
+        code, stdout, stderr = run_claude(ask, member["schema"], cwd=target, add_dirs=[target], tools=tools, model=args.model, effort=args.effort, max_turns=args.max_turns, bypass=True)
+        streams.append(stdout if stdout.endswith("\n") or not stdout else stdout + "\n")
+        last = (results(stdout) or [{}])[-1]
+        if last.get("subtype") != "error_max_turns":
+            break
+        ask = continuation(prompt, args.max_turns, n + 1)
+    stream = "".join(streams)
     out = parse_claude(code, stdout, stderr)
-    out["worker"] = worker_record(stdout, args.response, "claude-code", args.model)
-    return out, stdout
+    out["worker"] = worker_record(stream, args.response, "claude-code", args.model)
+    if len(streams) > 1:   # the record is the whole call: every session's turns and cost, and how many continued
+        done = results(stream)
+        out["worker"]["turns"] = sum(r.get("num_turns") or 0 for r in done)
+        out["worker"]["cost_usd"] = sum(r.get("total_cost_usd") or 0 for r in done) if any(r.get("total_cost_usd") is not None for r in done) else None
+        out["worker"]["continued"] = len(streams) - 1
+    return out, stream
 
 
 def codex(prompt, member, args, target):
@@ -484,6 +532,41 @@ def shell_tokens(command):
         return c.split()
 
 
+def leading_cd(tokens, target):
+    """(directory, the rest): a command's leading `cd DIR &&`s that stay inside the project, as the directory they reach
+    (relative to the project's root, `.` when there is none) and the argv after them. A host's shell keeps its directory
+    between calls, so a builder that ran `python3 tests/run.py` there reports `cd <project> && python3 tests/run.py` — the
+    same check (guin-site: 7 of 8 refusals in one cycle). A `cd` that leaves the project, or that only the shell could
+    resolve (`cd -`, `$VAR`, a backquote, a glob), is part of the command: (None, tokens)."""
+    root = os.path.realpath(target or ".")
+    here, rest = root, tokens
+    while len(rest) > 3 and rest[0] == "cd" and rest[2] == "&&":
+        d = rest[1]
+        if not d or d == "-" or re.search(r"[$`*?\[]", d):
+            return None, tokens
+        d = os.path.expanduser(d)
+        here = os.path.realpath(d if os.path.isabs(d) else os.path.join(here, d))
+        if here != root and not here.startswith(root + os.sep):
+            return None, tokens
+        rest = rest[3:]
+    return os.path.relpath(here, root), rest
+
+
+def ran_as_claimed(ran, toks, target):
+    """A claimed check `toks` is (part of) the command `ran`: as written, or — when the claim leads with a `cd` inside the
+    project — run in the same directory (a command with no leading `cd` ran where the shell stood: the project's root)."""
+    def found(seq, sub):
+        core = sub[1:] if len(sub) > 1 else sub   # drop the interpreter: python vs python3
+        return contains(seq, sub) or bool(core and contains(seq, core))
+    if found(ran, toks):
+        return True
+    where, rest = leading_cd(toks, target)
+    if where is None or rest is toks:
+        return False
+    ran_where, ran_rest = leading_cd(ran, target)
+    return ran_where == where and found(ran_rest, rest)
+
+
 def contains(seq, sub):
     """`sub` occurs in `seq` as a contiguous run (a check run as part of a longer command line still ran)."""
     n = len(sub)
@@ -511,13 +594,13 @@ def validate(out, member, request, target, stream_text, host, before):
                 problems.append("no-tree-changes: the tree changed (%s) — this member may not touch the project" % ", ".join(changed[:8]))
         elif name == "checks-ran":
             # every `verified[].check` must appear as (part of) a command the session actually ran — compared as shell tokens,
-            # not as text: `-p 'test_s[12].py'` ran quoted (the shell would glob it) and is the same argv reported unquoted
+            # not as text: `-p 'test_s[12].py'` ran quoted (the shell would glob it) and is the same argv reported unquoted;
+            # a leading `cd` into the project is where it ran, not what ran (ran_as_claimed)
             ran = [shell_tokens(c) for c in cmds]
             for v in out.get("verified") or []:
                 check = re.sub(r"\s*\(.*\)\s*$", "", str((v or {}).get("check", ""))).strip()   # a trailing remark — "(8 tests, OK)" — is not part of the command
                 toks = shell_tokens(check)
-                core = toks[1:] if len(toks) > 1 else toks   # drop the interpreter: python vs python3
-                if check and not any(contains(r, toks) or (core and contains(r, core)) for r in ran):
+                if check and not any(ran_as_claimed(r, toks, target) for r in ran):
                     problems.append("checks-ran: `%s` is claimed verified but no such command appears in the session's transcript (report the argv you ran, nothing else)" % check)
         elif name == "red-before-build":
             # the tests this member wrote must fail now: a contract test that passes before the build decides nothing. Not when

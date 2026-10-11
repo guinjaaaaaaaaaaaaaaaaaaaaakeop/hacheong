@@ -157,6 +157,50 @@ def test_the_host_stream_parses_and_nothing_short_of_an_answer_is_done():
     shutil.rmtree("/tmp/hacheong-x", ignore_errors=True)
 
 
+def test_a_session_that_runs_out_of_turns_is_continued_from_the_tree_a_bounded_number_of_times():
+    # guin-site: claude-host workers stopped at the turn ceiling six times in one cycle; each time the session retried by hand,
+    # "continue from the tree", and each continuation finished. The worker does that itself now, a bounded number of times.
+    import argparse
+    calls, real = [], w.run_claude
+    out_of_turns = stream({"type": "system", "subtype": "init", "model": "claude-t"},
+                          {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "python3 -m unittest tests/test_x.py -k Q_add"}}]}},
+                          {"type": "result", "is_error": True, "subtype": "error_max_turns", "num_turns": 40, "total_cost_usd": 1.0})
+    answers = []
+    w.run_claude = lambda prompt, *a, **k: (calls.append(prompt), (0, answers.pop(0), ""))[1]
+    args = argparse.Namespace(model=None, effort=None, max_turns=40, response="/tmp/hacheong-x/T1.response.json")
+    try:
+        with Repo() as r:
+            answers[:] = [out_of_turns, claude_stream(result=good())]
+            out, st = w.claude("PROMPT", w.load_member("dakdol"), args, r.dir)
+            assert out["status"] == "done" and len(calls) == 2 and "PROMPT" in calls[1] and "used all its 40 turns" in calls[1], calls
+            assert out["worker"]["continued"] == 1 and out["worker"]["turns"] == 41, out["worker"]
+            # the first session's commands count: it ran the check, the second only answered
+            assert w.validate(out, w.load_member("dakdol"), REQUEST, r.dir, st, "claude-code", w.tree_state(r.dir))["status"] == "done"
+            del calls[:]
+            answers[:] = [out_of_turns] * (1 + w.CONTINUATIONS) + [claude_stream(result=good())]
+            out, _ = w.claude("PROMPT", w.load_member("dakdol"), args, r.dir)
+            assert out["status"] == "failed" and len(calls) == 1 + w.CONTINUATIONS and "error_max_turns" in out["summary"], (out, len(calls))
+    finally:
+        w.run_claude = real
+        shutil.rmtree("/tmp/hacheong-x", ignore_errors=True)
+
+
+def test_the_continuation_count_is_read_tolerantly_and_the_first_session_always_runs():
+    # HACHEONG_CONTINUATIONS empty or not a number crashed every worker at import; a negative one ran no session at all
+    assert [w.continuations(v) for v in ("", "x", "-1", "0", " 3 ", 2)] == [2, 2, 0, 0, 3, 2]
+    import argparse
+    calls, real, saved = [], w.run_claude, w.CONTINUATIONS
+    w.run_claude = lambda prompt, *a, **k: (calls.append(prompt), (0, claude_stream(result=good()), ""))[1]
+    try:
+        w.CONTINUATIONS = 0
+        with Repo() as r:
+            out, _ = w.claude("PROMPT", w.load_member("dakdol"), argparse.Namespace(model=None, effort=None, max_turns=40, response="/tmp/hacheong-x/T1.response.json"), r.dir)
+            assert out["status"] == "done" and len(calls) == 1, (out, calls)
+    finally:
+        w.run_claude, w.CONTINUATIONS = real, saved
+        shutil.rmtree("/tmp/hacheong-x", ignore_errors=True)
+
+
 def test_validators_fire_on_recorded_cases():
     with Repo() as r:
         before = w.tree_state(r.dir)
@@ -192,6 +236,29 @@ def test_validators_fire_on_recorded_cases():
         # ...while a tidied rewrite of what ran is still not what ran
         tidied = good(verified=[{"check": "python3 -m unittest discover -s tests -p test_s3.py", "exit": 0}])
         assert w.validate(tidied, dakdol, REQUEST, r.dir, quoted, "codex", before)["status"] == "failed"
+        # a builder whose shell stayed in the project ran `python3 …` and reported `cd <project> && python3 …`: the same check
+        # (guin-site, write-records-build and write-bsky-build: 7 of 8 refusals in one cycle); a `cd` out of the project is not
+        incd = good(verified=[{"check": "cd %s && python3 -m unittest tests/test_x.py -k Q_add" % r.dir, "exit": 0}])
+        assert w.validate(incd, dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "done"
+        intests = claude_stream(("Bash", {"command": "cd tests && python3 -m unittest test_x"}))
+        assert w.validate(good(verified=[{"check": "cd %s/tests && python3 -m unittest test_x" % r.dir, "exit": 0}]), dakdol, REQUEST, r.dir, intests, "claude-code", before)["status"] == "done"
+        out = w.validate(good(verified=[{"check": "cd /elsewhere && python3 -m unittest tests/test_x.py -k Q_add", "exit": 0}]), dakdol, REQUEST, r.dir, ran, "claude-code", before)
+        assert out["status"] == "failed", "a cd that leaves the project is part of what ran"
+        piped = good(verified=[{"check": "cd %s && python3 -m unittest tests/test_x.py -k Q_add | tail -3" % r.dir, "exit": 0}])
+        assert w.validate(piped, dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "failed", "the rest is still compared token for token"
+        # where the claim says it ran is compared: a claim in tests/ is not a command that ran at the root
+        sub = good(verified=[{"check": "cd %s/tests && python3 -m unittest tests/test_x.py -k Q_add" % r.dir, "exit": 0}])
+        assert w.validate(sub, dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "failed", "a claim in tests/ ran elsewhere"
+        # ...and a claim in the project is not a command that ran after a cd out of it
+        away = claude_stream(("Bash", {"command": "cd /elsewhere && python3 -m unittest tests/test_x.py -k Q_add"}))
+        assert w.validate(incd, dakdol, REQUEST, r.dir, away, "claude-code", before)["status"] == "failed", "ran out of the project"
+        # a cd only the shell could resolve is part of the command, not a place in the project: fails closed
+        for d in ("-", "$HOME", "$OLDPWD", "`pwd`/..", "$(dirname $0)", "*"):
+            claimed = good(verified=[{"check": "cd %s && python3 -m unittest tests/test_x.py -k Q_add" % d, "exit": 0}])
+            assert w.validate(claimed, dakdol, REQUEST, r.dir, ran, "claude-code", before)["status"] == "failed", d
+        # chained cds resolve one after another
+        assert w.leading_cd(["cd", "tests", "&&", "cd", "..", "&&", "pytest"], r.dir) == (".", ["pytest"])
+        assert w.leading_cd(["cd", "tests", "&&", "cd", "../..", "&&", "pytest"], r.dir)[0] is None
         # red-before-build and only-tests-touched: teujip's tests must fail now, and only tests may change
         teujip = w.load_member("teujip")
         r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        import app\n")

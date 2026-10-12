@@ -353,6 +353,90 @@ def test_tests_kept_refuses_a_build_that_changed_the_contracts_tests_even_back_t
         assert out["status"] == "failed" and "are not in the tree" in " ".join(out["non-claims"]), out
 
 
+RETIRED = ["tests/test_admin.py", "tests/test_migrate.py", "tests/test_store.py", "tests/admin_jwt.mjs"]
+
+
+def cleanup_repo(r):
+    """guin-site before Q-cleanup: the four tests of the features the contract retires, committed beside the rest."""
+    for t in RETIRED:
+        r.write(t, "import unittest\n" if t.endswith(".py") else "export {}\n")
+    r.write("tests/test_read.py", "import unittest\n")
+    subprocess.run(["git", "add", "-A"], cwd=r.dir); subprocess.run(["git", "commit", "-qm", "before Q-cleanup"], cwd=r.dir)
+
+
+def test_a_test_the_writer_deleted_is_the_contracts_change_not_a_missing_test():
+    """guin-site 2026-10-12 (run-20261012-052255-3556, cleanup-tests): Q-cleanup retires /admin, the migration and D1, so
+    its tests writer deleted test_admin.py, test_migrate.py, test_store.py and admin_jwt.mjs — all in the task's `tests`.
+    red-before-build refused the finished task four times, "tests/test_admin.py does not exist", and the session took it over."""
+    with Repo() as r:
+        cleanup_repo(r)
+        teujip = w.load_member("teujip")
+        new = "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        import backup\n"
+        ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_backup.py"] + RETIRED + ["tests/test_read.py"],
+               "covers": [{"section": "Q-cleanup", "tests": ["test_Q_cleanup_backup"]}]}
+        request = dict(REQUEST, closes=["Q-cleanup"], tests=list(ans["tests"]))
+        # attempt 1: the files were committed and untouched when the call began; the writer deleted them during it
+        before = w.tree_state(r.dir)
+        assert not any(t in before for t in RETIRED), before
+        for t in RETIRED:
+            os.remove(os.path.join(r.dir, t))
+        r.write("tests/test_backup.py", new)
+        r.write("tests/test_read.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_read(self):\n        import backup\n")
+        out = w.validate(json.loads(json.dumps(ans)), teujip, request, r.dir, "", "claude-code", before)
+        assert out["status"] == "done", out
+        for t in RETIRED:
+            assert "deleted by the writer: %s — the contract retires it" % t in out["non-claims"], out
+        # attempt 2 (the one refused): an earlier attempt of the task already deleted them — `before` has them as gone
+        before2 = w.tree_state(r.dir)
+        assert all(before2.get(t) == "gone" for t in RETIRED), before2
+        out = w.validate(json.loads(json.dumps(ans)), teujip, request, r.dir, "", "claude-code", before2)
+        assert out["status"] == "done" and sum(n.startswith("deleted by the writer: ") for n in out["non-claims"]) == 4, out
+        # an uncommitted test that was in the tree when the call began, deleted by the writer: the same
+        r.write("tests/test_scratch.py", "import unittest\n")
+        before3 = w.tree_state(r.dir)
+        os.remove(os.path.join(r.dir, "tests", "test_scratch.py"))
+        out = w.validate(dict(json.loads(json.dumps(ans)), tests=["tests/test_scratch.py"]), teujip, request, r.dir, "", "claude-code", before3)
+        assert out["status"] == "done" and "deleted by the writer: tests/test_scratch.py — the contract retires it" in out["non-claims"], out
+        # a declared test that was never in the tree is still not there: the failure it was
+        out = w.validate(dict(json.loads(json.dumps(ans)), tests=["tests/test_backup.py", "tests/test_nowhere.py"]), teujip, request, r.dir, "", "claude-code", before2)
+        assert out["status"] == "failed" and "red-before-build: tests/test_nowhere.py does not exist" in out["non-claims"], out
+        # the remaining declared tests are still judged: one that passes before the build decides nothing
+        r.write("tests/test_backup.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        pass\n")
+        out = w.validate(json.loads(json.dumps(ans)), teujip, request, r.dir, "", "claude-code", before2)
+        assert out["status"] == "failed" and "red-before-build: tests/test_backup.py passes before the build — it decides nothing" in out["non-claims"], out
+
+
+def test_a_build_keeps_the_contracts_deleted_tests_deleted():
+    """chongdae sends the contract tests its writer deleted as `deleted-tests`, out of `tests`: the build must leave them absent
+    (bringing one back changes the contract), and nothing that requires a declared test to exist asks for them."""
+    with Repo() as r:
+        cleanup_repo(r)
+        for t in RETIRED:
+            os.remove(os.path.join(r.dir, t))
+        r.write("tests/test_backup.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        import backup\n")
+        dakdol = w.load_member("dakdol")
+        request = dict(REQUEST, closes=["Q-cleanup"], tests=["tests/test_backup.py", "tests/test_read.py"], **{"deleted-tests": list(RETIRED)})
+        ran = claude_stream(("Bash", {"command": "python -m unittest tests/test_x.py -k Q_add"}))
+        before = w.tree_state(r.dir)
+        r.write("backup.py", "x = 1\n")   # the build itself: fine, and the retired tests stay gone
+        assert w.validate(json.loads(json.dumps(GOOD)), dakdol, request, r.dir, ran, "claude-code", before)["status"] == "done"
+        # a sender that also left one in `tests`: it is a deleted test, not a protected one missing from the tree
+        both = dict(request, tests=request["tests"] + ["tests/test_admin.py"])
+        assert w.validate(json.loads(json.dumps(GOOD)), dakdol, both, r.dir, ran, "claude-code", before)["status"] == "done"
+        # the build brings one back (put back from HEAD): the contract changed — refused
+        subprocess.run(["git", "checkout", "--", "tests/test_admin.py"], cwd=r.dir, check=True)
+        out = w.validate(json.loads(json.dumps(GOOD)), dakdol, request, r.dir, ran, "claude-code", before)
+        assert out["status"] == "failed" and "tests-kept" in out["validation"]["failed"], out
+        assert any(n.startswith("tests-kept: the contract's deleted tests are in the tree (tests/test_admin.py)") for n in out["non-claims"]), out
+        os.remove(os.path.join(r.dir, "tests", "test_admin.py"))
+        # red-before-build skips them too: a tests writer answering a request that names them, without a non-claim of its own
+        teujip = w.load_member("teujip")
+        ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_backup.py"] + RETIRED,
+               "covers": [{"section": "Q-cleanup", "tests": ["test_Q_cleanup_backup"]}]}
+        out = w.validate(json.loads(json.dumps(ans)), teujip, request, r.dir, "", "claude-code", w.tree_state(r.dir))
+        assert out["status"] == "done", out
+
+
 def test_new_scaffolds_a_member_that_check_refuses_until_written():
     with Repo() as r:
         out = io.StringIO()

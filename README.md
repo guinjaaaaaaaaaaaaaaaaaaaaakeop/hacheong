@@ -55,9 +55,9 @@ subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
 the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
-the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` fails now · `only-tests-touched` nothing
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` fails now (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
 changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
-uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept) · `readme-only` no source file was opened (Read or
+uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
 
 ## Adding a member
@@ -140,6 +140,9 @@ the validator set. A member may not change these; when they must change, this pl
   non-claim, not held against it. No transcript: strict, as before. `red-before-build` cannot decide a test that passes
   when code was already changed and uncommitted before the call began (an earlier build attempt): it says so instead of
   failing the answer.
+- **A contract that retires a feature retires its tests.** The tests writer deletes them, and a declared test it deleted
+  is that change, not a missing test (guin-site Q-cleanup: four retired files refused a finished tests task four times as
+  "does not exist"). The build request names them in `deleted-tests`; `tests-kept` holds them deleted.
 - **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `tests-kept`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
 

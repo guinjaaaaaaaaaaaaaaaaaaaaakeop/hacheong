@@ -359,6 +359,23 @@ def tree_state(target):
     return state
 
 
+def path_list(value):
+    """A request's path list; a bare string is one path."""
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def deleted_by_writer(target, path, before):
+    """A declared test that is absent now but was in the tree when the call began — a file there then (`before` has its hash),
+    or one tracked at HEAD (unchanged, so `before` does not list it; or already `gone`, deleted by an earlier attempt of the
+    same task). Its writer deleted it: a contract that retires a feature retires its tests. A path never in the tree is not."""
+    if os.path.lexists(os.path.join(target, path)):
+        return False
+    if (before or {}).get(path) is not None:
+        return True
+    done = subprocess.run(["git", "cat-file", "-e", "HEAD:" + path], cwd=target, capture_output=True)
+    return done.returncode == 0
+
+
 def transcript_commands(stream_text, host):
     """The shell commands and file reads a session made, from its stream — what it actually did, not what it says."""
     cmds, reads = [], []
@@ -611,8 +628,16 @@ def validate(out, member, request, target, stream_text, host, before):
             # correct new test pass before this slice's build; that is not the test deciding nothing (guin-site s2-tests-nobind)
             built_before = sorted(p for p in (before or {}) if p.endswith(CODE_EXT) and not p.startswith(("tests/", "test/"))
                                   and p not in (out.get("tests") or []))
+            # a declared test its writer deleted, or one the request names in `deleted-tests`, is the contract's own change: said, skipped
+            # (guin-site Q-cleanup: four retired test files refused a finished tests task four times as "does not exist")
+            retired = set(path_list(request.get("deleted-tests")))
             for t in out.get("tests") or []:
                 p = os.path.join(target, t)
+                if t in retired and not os.path.exists(p):
+                    continue
+                if not os.path.exists(p) and deleted_by_writer(target, t, before):
+                    out.setdefault("non-claims", []).append("deleted by the writer: %s — the contract retires it" % t)
+                    continue
                 if not os.path.exists(p):
                     problems.append("red-before-build: %s does not exist" % t)
                     continue
@@ -643,10 +668,18 @@ def validate(out, member, request, target, stream_text, host, before):
             # the request's `tests` are the contract's, as they were in the tree when the session started (committed or not):
             # a build that changed one — or put it back to HEAD — decided its own verdict. Said here, at the end of this call,
             # not later as checks failing against tests nobody meant
+            # `deleted-tests`: the contract's tests its writer deleted (a contract that retires a feature). They stay deleted: a build
+            # that brings one back changed the contract as surely as one that edits a kept test
+            retired = path_list(request.get("deleted-tests"))
+            back = [t for t in retired if os.path.lexists(os.path.join(target, t))]
+            if back:
+                problems.append("tests-kept: the contract's deleted tests are in the tree (%s) — its tests writer deleted them, the contract "
+                                "retires them; a build that brings one back changed the contract" % ", ".join(back))
+            kept = [t for t in path_list(request.get("tests")) if t not in retired]
             after = tree_state(target)
             if before is not None and after is not None:
-                changed = [t for t in request.get("tests") or [] if before.get(t) != after.get(t)]
-                absent = [t for t in request.get("tests") or [] if not os.path.isfile(os.path.join(target, t))]
+                changed = [t for t in kept if before.get(t) != after.get(t)]
+                absent = [t for t in kept if not os.path.isfile(os.path.join(target, t))]
                 if absent:
                     problems.append("tests-kept: the contract's protected tests are not in the tree (%s) — nothing kept them; "
                                     "a path list given as one string is one missing path" % ", ".join(absent))

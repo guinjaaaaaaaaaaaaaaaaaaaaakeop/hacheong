@@ -145,6 +145,9 @@ the validator set. A member may not change these; when they must change, this pl
   "does not exist"). The build request names them in `deleted-tests`; `tests-kept` holds them deleted.
 - **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `tests-kept`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
+- `tests-kept` snapshots each requested test's contents immediately before the host call and compares them after it.
+  Committing a modified test, putting it in an ignored nested repository, or working without git does not hide a change.
+  Other tree validators still use git status; this content snapshot protects the request's tests specifically.
 
 ## Versioning
 

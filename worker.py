@@ -364,6 +364,18 @@ def path_list(value):
     return [value] if isinstance(value, str) else list(value or [])
 
 
+def protected_tests(target, request):
+    """The requested tests' actual contents, independent of git status, ignores or HEAD."""
+    result = {}
+    for path in path_list(request.get("tests")):
+        full = Path(target) / path
+        try:
+            result[path] = hashlib.sha256(full.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            result[path] = None
+    return result
+
+
 def deleted_by_writer(target, path, before):
     """A declared test that is absent now but was in the tree when the call began — a file there then (`before` has its hash),
     or one tracked at HEAD (unchanged, so `before` does not list it; or already `gone`, deleted by an earlier attempt of the
@@ -590,7 +602,7 @@ def contains(seq, sub):
     return n > 0 and any(seq[i:i + n] == sub for i in range(len(seq) - n + 1))
 
 
-def validate(out, member, request, target, stream_text, host, before):
+def validate(out, member, request, target, stream_text, host, before, protected_before=None):
     """Run the member's declared validators. Each failure is written into the answer as a non-claim and the status becomes
     `failed` — an answer that broke its own rules is not an answer, whatever it says about itself."""
     problems = []
@@ -677,8 +689,10 @@ def validate(out, member, request, target, stream_text, host, before):
                                 "retires them; a build that brings one back changed the contract" % ", ".join(back))
             kept = [t for t in path_list(request.get("tests")) if t not in retired]
             after = tree_state(target)
-            if before is not None and after is not None:
-                changed = [t for t in kept if before.get(t) != after.get(t)]
+            baseline = protected_before if protected_before is not None else before
+            current = protected_tests(target, request) if protected_before is not None else after
+            if baseline is not None and current is not None:
+                changed = [t for t in kept if baseline.get(t) != current.get(t)]
                 absent = [t for t in kept if not os.path.isfile(os.path.join(target, t))]
                 if absent:
                     problems.append("tests-kept: the contract's protected tests are not in the tree (%s) — nothing kept them; "
@@ -770,8 +784,9 @@ def main():
                                  ", ".join("%s: %s" % (k, "yes" if v else "no") for k, v in capabilities(member, args.host).items()))]}
     else:
         before = tree_state(target)
+        protected_before = protected_tests(target, request)
         out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
-        out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before)
+        out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before, protected_before)
         # a task that did not declare `needs` learns it mid-task: the refusal in a command's output is said as such
         out = mark_lacked(out, member, request, stream, args.host)
     # the answer used to carry `member` and `domain` too; no reader ever consulted them — the runner named both when it asked

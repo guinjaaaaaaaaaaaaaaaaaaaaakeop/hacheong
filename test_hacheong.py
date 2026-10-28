@@ -356,6 +356,41 @@ def test_tests_kept_refuses_a_build_that_changed_the_contracts_tests_even_back_t
 RETIRED = ["tests/test_admin.py", "tests/test_migrate.py", "tests/test_store.py", "tests/admin_jwt.mjs"]
 
 
+def test_worker_protects_tests_across_commits_ignored_nested_repos_and_non_git_targets():
+    """Exercise the real dispatch boundary: git status cannot witness protected contents."""
+    from unittest.mock import patch
+    for mode in ("committed", "nested", "no-git", "unchanged"):
+        with Repo() as r, tempfile.TemporaryDirectory() as outdir:
+            test = "engine/test_contract.py" if mode == "nested" else "tests/test_contract.py"
+            r.write(test, "# original contract\n")
+            if mode == "nested":
+                r.write(".gitignore", "engine/\n")
+                subprocess.run(["git", "init", "-q", "engine"], cwd=r.dir, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=r.dir, check=True)
+            subprocess.run(["git", "commit", "-qm", "contract"], cwd=r.dir, check=True)
+            if mode == "no-git":
+                shutil.rmtree(os.path.join(r.dir, ".git"))
+            request = dict(REQUEST, target=r.dir, tests=[test], checks=[])
+            req, resp = os.path.join(outdir, "request.json"), os.path.join(outdir, "response.json")
+            with open(req, "w") as fh:
+                json.dump(request, fh)
+            def host(*args):
+                if mode != "unchanged":
+                    r.write(test, "# builder rewrote the contract\n")
+                if mode == "committed":
+                    subprocess.run(["git", "add", "-A"], cwd=r.dir, check=True)
+                    subprocess.run(["git", "commit", "-qm", "changed test"], cwd=r.dir, check=True)
+                return good(verified=[]), ""
+            with patch.object(w, "claude", host), patch.object(sys, "argv", ["worker.py", "--member", "dakdol", "--request", req, "--response", resp]):
+                assert w.main() == 0
+            with open(resp) as fh:
+                answer = json.load(fh)
+            if mode == "unchanged":
+                assert answer["status"] == "done", answer
+            else:
+                assert answer["status"] == "failed" and "tests-kept" in answer["validation"]["failed"], (mode, answer)
+
+
 def cleanup_repo(r):
     """guin-site before Q-cleanup: the four tests of the features the contract retires, committed beside the rest."""
     for t in RETIRED:

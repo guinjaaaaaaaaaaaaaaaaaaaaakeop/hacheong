@@ -202,11 +202,18 @@ def domain_text(domain, member, target=None):
     return None, None
 
 
-def environment_text(member, host):
-    """What the session this call starts can and cannot reach, said up front: a worker that learns mid-task that the network
+def environment_text(member, host, native=False):
+    """What the session this call starts can and cannot reach, or the parent's authority for a native call:
+    a worker that learns mid-task that the network
     is gone improvises around it (a lock file written by hand, the old tool wrapped in the new one) instead of saying so."""
     lines = ["# Where you run", ""]
-    if host == "codex":
+    if native:
+        lines.append("You are a subagent the parent session dispatched itself (a native call); this prompt was printed by "
+                     "`worker.py --prompt-only`, which grants nothing. What you may read, write and run, your tools, and whether "
+                     "you have the network or loopback (binding a local port) come from the parent host and its configuration, "
+                     "not from this text. This runner starts no subprocess for you — none of its sandboxes applies — and runs "
+                     "none of its validators on your answer.")
+    elif host == "codex":
         sandbox = os.environ.get("AGENT_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
         if sandbox == "workspace-write":
             lines.append("A Codex sandbox (`workspace-write`): you can write inside `target`. By default it has no network — package "
@@ -217,9 +224,10 @@ def environment_text(member, host):
             lines.append("A Codex sandbox (`%s`)." % sandbox)
     else:
         lines.append("A Claude Code session with these tools only: %s." % (member["policy"].get("tools") or "Read,Grep,Glob"))
-    can = capabilities(member, "codex" if host == "codex" else "claude")
-    lines.append("Network: %s. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): %s."
-                 % ("yes" if can["network"] else "no", "yes" if can["loopback"] else "no"))
+    if not native:
+        can = capabilities(member, "codex" if host == "codex" else "claude")
+        lines.append("Network: %s. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): %s."
+                     % ("yes" if can["network"] else "no", "yes" if can["loopback"] else "no"))
     lines.append("What the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not "
                  "yours to work around: stop with `status: blocked` and name it. When it is the network or loopback, list it in "
                  "`lacked` (`[\"loopback\"]`, `[\"network\"]`), not only in prose — the runner reads `lacked`, not your sentences; "
@@ -228,14 +236,14 @@ def environment_text(member, host):
     return "\n".join(lines)
 
 
-def assemble(member, request, domain, target=None, host=None):
+def assemble(member, request, domain, target=None, host=None, native=False):
     dtext, dpath = domain_text(domain, member["name"], target)
     parts = ["# Who you are\n\n" + member["role"]]
     if dtext:
         parts.append("# The domain: %s\n\n%s" % (domain, dtext))
     else:
         parts.append("# The domain: %s\n\nNo domain text is available for %r. Work from your role alone and say so in `non-claims`." % (domain, domain))
-    parts.append(environment_text(member, host))
+    parts.append(environment_text(member, host, native=native))
     parts.append("# Request\n\nWork only inside `target`. Do not write the response file; answer with the JSON object.\n\n" + json.dumps(request, ensure_ascii=False, indent=2))
     return "\n\n".join(parts), dpath
 
@@ -760,7 +768,7 @@ def main():
     ap.add_argument("--effort", default=None)
     ap.add_argument("--max-turns", type=int, default=None, help="turn budget (default: the member's policy `max-turns`, else 40)")
     ap.add_argument("--domain", default=None, help="override the domain the request implies (code, plan, design, …)")
-    ap.add_argument("--prompt-only", action="store_true", help="print the prompt this call would send and exit — for a session that dispatches the host's own subagent (a `native:` provider)")
+    ap.add_argument("--prompt-only", action="store_true", help="print a neutral native prompt and exit — for a session that dispatches the host's own subagent (a `native:` provider)")
     args = ap.parse_args()
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
     if request.get("artifact-type") != "chongdae/request@1":
@@ -770,7 +778,7 @@ def main():
     if args.max_turns is None:
         args.max_turns = int(member["policy"].get("max-turns", os.environ.get("HACHEONG_MAX_TURNS", 40)))
     domain = domain_for(request, args.domain)
-    prompt, _ = assemble(member, request, domain, target, "claude" if args.prompt_only else args.host)
+    prompt, _ = assemble(member, request, domain, target, args.host, native=args.prompt_only)
     if args.prompt_only:
         print(prompt + "\n\n# Answer\n\nYour whole final message is one JSON object, nothing else, matching this schema:\n" + json.dumps(member["schema"]))
         return 0

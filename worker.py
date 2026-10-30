@@ -58,15 +58,22 @@ VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-bu
 
 def record_paths(target):
     """The products' records and the environment, not the project: what `record-paths` in hunsu.lock.json declares (each plugin's
-    `records`), else the siblings' names as they were before the lock carried them. Always the run's own transcripts' home."""
+    `records`), else the siblings' names as they were before the lock carried them. Always the run's own transcripts' home
+    and the five environment files. A trailing slash declares a directory; every other entry is an exact file path."""
     lock = {}
     try:
         lock = json.loads(Path(target, "hunsu.lock.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pass
-    declared = lock.get("record-paths")
+    declared = lock.get("record-paths") if isinstance(lock, dict) else None
     others = sorted({p for ps in declared.values() for p in ps}) if isinstance(declared, dict) else [".chongdae/", ".mangsang/", ".dwitbuk/", "reviews/"]
-    return tuple(sorted(set(others) | {".chongdae/", "hunsu"}))
+    return tuple(sorted(set(others) | {".chongdae/", "hunsu.json", "hunsu.lock.json", "hunsu-judgments.json",
+                                      "hunsu-conflicts.md", "hunsu.local.json"}))
+
+
+def is_record(path, records):
+    """A project-root-relative path matches an exact file or lies under a declared directory at that root."""
+    return any(path.startswith(p) if p.endswith("/") else path == p for p in records)
 
 
 def py_inventory(text):
@@ -98,24 +105,26 @@ def py_inventory(text):
 def inventory(target, at_head):
     """The project's Python inventory as one triple (names, docstrings, comment lines), summed over its .py files — at HEAD
     (from git) or in the working tree. Tests and records are left out: tests are the contract's, records are not the program."""
-    skip = (".git/", "__pycache__/", ".venv/", "tests/", "test/") + tuple(p for p in record_paths(target) if p.endswith("/"))
+    skip = (".git/", "__pycache__/", ".venv/", "tests/", "test/")
+    records = record_paths(target)
     files = {}
     if at_head:
         done = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
         for p in done.stdout.split("\n"):
             p = p.strip()
-            if p.endswith(".py") and not p.startswith(skip) and not any("/" + s in "/" + p for s in skip):
+            if p.endswith(".py") and not p.startswith(skip) and not any("/" + s in "/" + p for s in skip) and not is_record(p, records):
                 shown = subprocess.run(["git", "show", "HEAD:" + p], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
                 if shown.returncode == 0:
                     files[p] = shown.stdout
     else:
         for root, dirs, names in os.walk(target):
-            rel = os.path.relpath(root, target).replace(os.sep, "/") + "/"
-            dirs[:] = [d for d in dirs if not (rel.lstrip("./") + d + "/").startswith(skip) and d + "/" not in skip]
+            rel = os.path.relpath(root, target).replace(os.sep, "/")
+            rel = "" if rel == "." else rel + "/"
+            dirs[:] = [d for d in dirs if d + "/" not in skip and not is_record(rel + d + "/", records)]
             for n in names:
-                if n.endswith(".py"):
+                if n.endswith(".py") and not is_record(rel + n, records):
                     try:
-                        files[(rel.lstrip("./") + n).lstrip("/")] = open(os.path.join(root, n), encoding="utf-8", errors="replace").read()
+                        files[rel + n] = open(os.path.join(root, n), encoding="utf-8", errors="replace").read()
                     except OSError:
                         pass
     names, docs, comments = set(), 0, 0
@@ -357,10 +366,11 @@ def tree_state(target):
                 paths.append(parts[i])
             i += 1
     state = {}
+    records = record_paths(target)
     for path in paths:
         if "__pycache__" in path or path.endswith((".pyc", ".DS_Store")):   # what interpreters and the OS leave behind is not a change
             continue
-        if path.startswith(record_paths(target)):   # the run's record — where this worker's own transcript lands — and the other products' are not the project
+        if is_record(path, records):   # records are exact files or directories anchored at the project root
             continue
         full = os.path.join(target, path)
         state[path] = hashlib.sha1(open(full, "rb").read()).hexdigest() if os.path.isfile(full) else "gone"

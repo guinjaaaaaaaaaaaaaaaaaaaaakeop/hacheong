@@ -74,7 +74,7 @@ def record_paths(target):
 
 def is_record(path, records):
     """A project-root-relative path matches an exact file or lies under a declared directory at that root."""
-    return any(path.startswith(p) if p.endswith("/") else path == p for p in records)
+    return any((path == p[:-1] or path.startswith(p)) if p.endswith("/") else path == p for p in records)
 
 
 def py_inventory(text):
@@ -441,6 +441,9 @@ class Result(unittest.TestResult):
         self.fixture_failures = 0
 
     def classify_failure(self, test, err):
+        if not isinstance(err[0], type) or not issubclass(err[0], AssertionError):
+            super().addError(test, err)
+            return
         method = getattr(test, getattr(test, "_testMethodName", ""), None)
         code = getattr(method, "__code__", None)
         tb = err[2]

@@ -656,5 +656,85 @@ class G9NoPassFds(Gate):
         self.assertEqual(listing(), before)
         self.assertEqual(os.listdir(scratch), [], "scratch left behind")
 
+
+BROAD = HEAD + "class T(unittest.TestCase):\n    failureException = Exception\n"
+
+
+class G10OnlyAssertionErrors(Gate):
+    """Real unittest files whose failureException is broader than AssertionError: only AssertionError failures prove red."""
+
+    def test_G10_broad_failure_exception_with_a_runtime_error_body_is_unverified(self):
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        raise RuntimeError('runtime failure, not assertion')\n")
+
+    def test_G10_broad_failure_exception_with_a_runtime_error_in_a_subtest_is_unverified(self):
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        with self.subTest(i=1):\n"
+                           "            raise RuntimeError('runtime failure, not assertion')\n")
+
+    def test_G10_broad_failure_exception_with_self_fail_is_unverified(self):
+        # self.fail raises self.failureException, here a plain Exception
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        self.fail('not built')\n")
+
+    def test_G10_broad_failure_exception_with_assert_equal_is_unverified(self):
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        self.assertEqual(1, 2)\n")
+
+    def test_G10_broad_failure_exception_with_other_error_types_is_unverified(self):
+        for exc in ("ValueError('v')", "KeyError('k')", "OSError('o')", "type('Custom', (Exception,), {})('c')"):
+            with self.subTest(exc=exc):
+                self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        raise %s\n" % exc)
+
+    def test_G10_base_exception_failure_exception_is_unverified(self):
+        self.assertVerdict("unverified", HEAD + "class T(unittest.TestCase):\n    failureException = BaseException\n"
+                           "    def test_Q_add(self):\n        raise RuntimeError('runtime failure, not assertion')\n")
+
+    def test_G10_runtime_error_as_failure_exception_is_unverified(self):
+        self.assertVerdict("unverified", HEAD + "class T(unittest.TestCase):\n    failureException = RuntimeError\n"
+                           "    def test_Q_add(self):\n        self.fail('not built')\n")
+
+    def test_G10_one_genuine_assertion_plus_one_non_assertion_failure_is_unverified(self):
+        self.assertVerdict("unverified", HEAD + "class A(unittest.TestCase):\n    def test_Q_add(self):\n        self.fail('not built')\n"
+                           "class B(unittest.TestCase):\n    failureException = Exception\n"
+                           "    def test_Q_add_too(self):\n        raise RuntimeError('runtime failure, not assertion')\n")
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n        assert 1 == 2, 'not built'\n"
+                           "    def test_Q_add_too(self):\n        raise RuntimeError('runtime failure, not assertion')\n")
+
+    def test_G10_genuine_and_non_assertion_failures_in_subtests_of_one_test_is_unverified(self):
+        self.assertVerdict("unverified", BROAD + "    def test_Q_add(self):\n"
+                           "        with self.subTest(i=0):\n            assert False, 'not built'\n"
+                           "        with self.subTest(i=1):\n            raise RuntimeError('runtime failure, not assertion')\n")
+
+    def test_G10_genuine_assertion_errors_in_the_body_are_still_red(self):
+        for body in ("self.fail('not built')", "self.assertEqual(1, 2)", "assert 1 == 2, 'not built'"):
+            with self.subTest(body=body):
+                self.assertVerdict("red", HEAD + "class T(unittest.TestCase):\n    def test_Q_add(self):\n        %s\n" % body)
+
+    def test_G10_assertion_error_subclass_as_failure_exception_is_still_red(self):
+        sub = HEAD + "class Missing(AssertionError):\n    pass\nclass T(unittest.TestCase):\n    failureException = Missing\n"
+        for body in ("self.fail('not built')", "self.assertEqual(1, 2)", "raise Missing('not built')"):
+            with self.subTest(body=body):
+                self.assertVerdict("red", sub + "    def test_Q_add(self):\n        %s\n" % body)
+        self.assertVerdict("red", sub + "    def test_Q_add(self):\n        with self.subTest(i=1):\n            self.fail('not built')\n")
+
+    def test_G10_bare_assert_under_a_broad_failure_exception_is_still_red(self):
+        self.assertVerdict("red", BROAD + "    def test_Q_add(self):\n        assert 1 == 2, 'not built'\n")
+        self.assertVerdict("red", BROAD + "    def test_Q_add(self):\n        raise AssertionError('not built')\n")
+
+    def test_G10_bare_assert_in_a_subtest_under_a_broad_failure_exception_is_still_red(self):
+        self.assertVerdict("red", BROAD + "    def test_Q_add(self):\n        with self.subTest(i=1):\n            assert False, 'not built'\n")
+
+    def test_G10_assertion_failures_in_setup_or_teardown_are_still_unverified(self):
+        for hook in ("setUp", "tearDown"):
+            for head in (HEAD + "class T(unittest.TestCase):\n", BROAD):
+                with self.subTest(hook=hook, broad=head == BROAD):
+                    self.assertVerdict("unverified", head + "    def %s(self):\n        assert False, 'fixture'\n"
+                                       "    def test_Q_add(self):\n        assert False, 'not built'\n" % hook)
+
+    def test_G10_non_assertion_failures_in_setup_under_a_broad_failure_exception_are_unverified(self):
+        self.assertVerdict("unverified", BROAD + "    def setUp(self):\n        raise RuntimeError('fixture')\n"
+                           "    def test_Q_add(self):\n        assert False, 'not built'\n")
+
+    def test_G10_a_passing_file_with_a_broad_failure_exception_is_still_green(self):
+        self.assertVerdict("green", BROAD + "    def test_Q_add(self):\n        self.assertEqual(1, 1)\n")
+
+
 if __name__ == "__main__":
     unittest.main()

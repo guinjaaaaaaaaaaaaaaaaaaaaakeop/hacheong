@@ -419,6 +419,143 @@ class R6TestsKept(RepoCase):
         self.assertEqual(out["status"], "done", out)
 
 
+class R8DirectoryItself(RepoCase):
+    """A directory record covers the directory's own path: a tracked symlink committed there and deleted is a record change."""
+
+    def symlink(self, rel, to="README.md"):
+        p = os.path.join(self.dir, rel)
+        os.makedirs(os.path.dirname(p) or self.dir, exist_ok=True)
+        try:
+            os.symlink(to, p)
+        except (OSError, NotImplementedError, AttributeError) as e:
+            self.skipTest("this platform cannot make symlinks: %s" % e)
+
+    def tracked_symlink_deleted(self, rel, lock=None, replace=False):
+        if lock is not None:
+            self.lock(lock)
+        self.symlink(rel)
+        self.commit("symlink at %s" % rel)
+        os.remove(os.path.join(self.dir, rel))
+        if replace:
+            self.write(rel + "/a.json", "{}\n")
+            self.write(rel + "/x/y.json", "{}\n")
+
+    def assertNothingAt(self, rel, state):
+        self.assertFalse([k for k in state if k == rel or k.startswith(rel + "/")],
+                         "%s is a declared directory record: neither it nor anything under it may appear: %r" % (rel, state))
+
+    def test_R8_is_record_covers_the_directory_path_itself_and_under_it(self):
+        for path in ("reviews", "reviews/a.json", "reviews/x/y.json"):
+            self.assertIs(worker.is_record(path, ["reviews/"]), True, path)
+        for path in ("docs/rec", "docs/rec/x.json"):
+            self.assertIs(worker.is_record(path, ["docs/rec/"]), True, path)
+        self.assertIs(worker.is_record("reviews", ("hunsu.json", "reviews/", "notes.rec")), True)
+
+    def test_R8_is_record_never_covers_a_prefix_sibling_of_a_directory(self):
+        for path in ("reviews-old", "reviews-old/a.json", "reviews.py", "reviewsx", "reviews.", "review", ""):
+            self.assertIs(worker.is_record(path, ["reviews/"]), False, path)
+        for path in ("docs/record", "docs/rec.md", "x/docs/rec", "docs", "docs/re"):
+            self.assertIs(worker.is_record(path, ["docs/rec/"]), False, path)
+
+    def test_R8_is_record_directory_is_anchored_at_the_root(self):
+        for path in ("src/reviews", "src/reviews/a.json", "/reviews", "./reviews"):
+            self.assertIs(worker.is_record(path, ["reviews/"]), False, path)
+
+    def test_R8_is_record_exact_file_covers_exactly_that_path(self):
+        self.assertIs(worker.is_record("hunsu.json", ["hunsu.json"]), True)
+        for path in ("hunsu.json/x", "hunsu.json.bak", "hunsu.jsonx", "hunsu", "sub/hunsu.json", "hunsu.json/"):
+            self.assertIs(worker.is_record(path, ["hunsu.json"]), False, path)
+
+    def test_R8_is_record_exact_file_is_never_made_a_directory_by_the_disk(self):
+        self.write("mangsang/x.json", "{}\n")
+        cwd = os.getcwd()
+        os.chdir(self.dir)
+        self.addCleanup(os.chdir, cwd)
+        self.assertTrue(os.path.isdir("mangsang"))
+        self.assertIs(worker.is_record("mangsang/x.json", ["mangsang"]), False)
+        self.assertIs(worker.is_record("mangsang/x.json", ("mangsang",)), False)
+        self.assertIs(worker.is_record("mangsang", ["mangsang"]), True)
+
+    def test_R8_tree_state_bare_record_with_a_directory_on_disk_still_shows_its_children(self):
+        self.lock({"record-paths": {"p": ["mangsang"]}})
+        self.write("mangsang/x.json", "{}\n")
+        self.assertVisible("mangsang/x.json", self.state())
+
+    def test_R8_tree_state_deleted_symlink_at_a_declared_directory_is_left_out(self):
+        self.tracked_symlink_deleted("reviews", lock=DECLARED)
+        self.assertNothingAt("reviews", self.state())
+
+    def test_R8_tree_state_deleted_symlink_at_the_fallback_directory_is_left_out_without_a_lock(self):
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "hunsu.lock.json")))
+        self.tracked_symlink_deleted("reviews")
+        self.assertNothingAt("reviews", self.state())
+
+    def test_R8_tree_state_deleted_symlink_at_a_nested_declared_directory_is_left_out(self):
+        self.tracked_symlink_deleted("docs/rec", lock=DECLARED)
+        self.assertNothingAt("docs/rec", self.state())
+
+    def test_R8_tree_state_deleted_symlink_replaced_by_a_real_directory_is_left_out(self):
+        self.tracked_symlink_deleted("reviews", lock=DECLARED, replace=True)
+        self.assertNothingAt("reviews", self.state())
+
+    def test_R8_tree_state_deleted_symlink_replaced_by_a_real_directory_is_left_out_without_a_lock(self):
+        self.tracked_symlink_deleted("reviews", replace=True)
+        self.assertNothingAt("reviews", self.state())
+
+    def test_R8_tree_state_deleted_symlink_at_an_undeclared_sibling_is_gone(self):
+        for lock in (DECLARED, None):
+            with self.subTest(lock=lock is not None):
+                if lock is None and os.path.exists(os.path.join(self.dir, "hunsu.lock.json")):
+                    os.remove(os.path.join(self.dir, "hunsu.lock.json"))
+                    self.commit("no lock")
+                self.tracked_symlink_deleted("reviews-old", lock=lock)
+                s = self.state()
+                self.assertEqual(s.get("reviews-old"), "gone", s)
+                self.commit("deleted reviews-old")
+
+    def sibi(self, change):
+        sibi = worker.load_member("sibi")
+        before = worker.tree_state(self.dir)
+        change()
+        return worker.validate({"status": "done", "summary": "", "non-claims": [], "findings": []}, sibi, REQUEST, self.dir, "",
+                               "claude-code", before)
+
+    def test_R8_no_tree_changes_passes_a_deleted_record_symlink(self):
+        for lock in (DECLARED, None):
+            with self.subTest(lock=lock is not None):
+                if lock is not None:
+                    self.lock(lock)
+                self.symlink("reviews")
+                self.commit("symlink")
+                out = self.sibi(lambda: os.remove(os.path.join(self.dir, "reviews")))
+                self.assertEqual(out["status"], "done", out)
+                self.assertNotIn("no-tree-changes", out.get("validation", {}).get("failed", []), out)
+                self.commit("deleted")
+                if lock is not None:
+                    os.remove(os.path.join(self.dir, "hunsu.lock.json"))
+                    self.commit("no lock")
+
+    def test_R8_no_tree_changes_passes_a_deleted_record_symlink_replaced_by_a_directory(self):
+        self.lock(DECLARED)
+        self.symlink("reviews")
+        self.commit("symlink")
+
+        def change():
+            os.remove(os.path.join(self.dir, "reviews"))
+            self.write("reviews/a.json", "{}\n")
+
+        out = self.sibi(change)
+        self.assertEqual(out["status"], "done", out)
+
+    def test_R8_no_tree_changes_still_fails_a_deleted_symlink_at_an_undeclared_sibling(self):
+        self.lock(DECLARED)
+        self.symlink("reviews-old")
+        self.commit("symlink")
+        out = self.sibi(lambda: os.remove(os.path.join(self.dir, "reviews-old")))
+        self.assertEqual(out["status"], "failed", out)
+        self.assertIn("no-tree-changes", out.get("validation", {}).get("failed", []), out)
+
+
 SIBLINGS = {"chongdae", "hunsu", "mangsang", "dwitbuk", "jokbo", "dakdol", "deomi", "tools"}
 
 

@@ -406,6 +406,99 @@ def deleted_by_writer(target, path, before):
     return done.returncode == 0
 
 
+RED_REPORT_KEYS = ("tests_run", "assertion_failures", "fixture_failures", "errors", "skipped", "expected_failures", "unexpected_successes")
+
+
+def red_verdict(report):
+    """Only an assertion failure in a test body, with no errors or fixture failures, proves red."""
+    if (not isinstance(report, dict) or set(report) != set(RED_REPORT_KEYS)
+            or any(type(report[k]) is not int or report[k] < 0 for k in RED_REPORT_KEYS)):
+        return "unverified", "unittest returned an invalid report"
+    if report["errors"]:
+        return "unverified", "unittest recorded errors"
+    if report["fixture_failures"]:
+        return "unverified", "an assertion failed outside a test body"
+    if not report["tests_run"]:
+        return "unverified", "no tests ran: only unittest TestCase tests are verified"
+    if report["assertion_failures"]:
+        return "red", "unittest recorded an assertion failure inside a test body"
+    return "green", "unittest recorded no assertion failures inside test bodies"
+
+
+# Run in the target's interpreter: TestProgram supplies the same file loading as `python -m unittest`.
+# The inherited pipe carries only the report, independently of anything tests print to stdout or stderr.
+UNITTEST_RED_HARNESS = r'''
+import json
+import os
+import sys
+import unittest
+
+class Result(unittest.TestResult):
+    def __init__(self):
+        super().__init__()
+        self.assertion_failures = 0
+        self.fixture_failures = 0
+
+    def classify_failure(self, test, err):
+        method = getattr(test, getattr(test, "_testMethodName", ""), None)
+        code = getattr(method, "__code__", None)
+        tb = err[2]
+        while tb is not None:
+            if code is not None and tb.tb_frame.f_code is code:
+                self.assertion_failures += 1
+                return
+            tb = tb.tb_next
+        self.fixture_failures += 1
+
+    def addFailure(self, test, err):
+        self.classify_failure(test, err)
+        super().addFailure(test, err)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None and issubclass(err[0], test.failureException):
+            self.classify_failure(test, err)
+        super().addSubTest(test, subtest, err)
+
+class Runner:
+    def run(self, test):
+        result = Result()
+        test(result)
+        return result
+
+path, fd = sys.argv[1], int(sys.argv[2])
+program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(), exit=False)
+result = program.result
+report = dict(tests_run=result.testsRun, assertion_failures=result.assertion_failures,
+              fixture_failures=result.fixture_failures, errors=len(result.errors), skipped=len(result.skipped),
+              expected_failures=len(result.expectedFailures), unexpected_successes=len(result.unexpectedSuccesses))
+with os.fdopen(fd, "w", encoding="utf-8") as channel:
+    json.dump(report, channel)
+'''
+
+
+def unittest_red(target, path):
+    """Judge one Python unittest file from structured evidence in a fresh process, without target scratch files."""
+    if not path.endswith(".py"):
+        return "unverified", "only Python unittest files are verified automatically"
+    py = "python3" if shutil.which("python3") else "python"
+    read_fd, write_fd = os.pipe()
+    try:
+        try:
+            done = subprocess.run([py, "-c", UNITTEST_RED_HARNESS, path, str(write_fd)], cwd=target,
+                                  pass_fds=(write_fd,), capture_output=True)
+        finally:
+            os.close(write_fd)
+        if done.returncode != 0:
+            return "unverified", "unittest harness exited unsuccessfully (%s)" % done.returncode
+        # REPORT is seven integer counters, small enough to fit in the pipe before the process exits.
+        report = json.loads(os.read(read_fd, 65536))
+    except (OSError, ValueError):
+        return "unverified", "unittest harness did not return a valid JSON report"
+    finally:
+        os.close(read_fd)
+    return red_verdict(report)
+
+
 def transcript_commands(stream_text, host):
     """The shell commands and file reads a session made, from its stream — what it actually did, not what it says."""
     cmds, reads = [], []
@@ -650,7 +743,7 @@ def validate(out, member, request, target, stream_text, host, before, protected_
                 if check and not any(ran_as_claimed(r, toks, target) for r in ran):
                     problems.append("checks-ran: `%s` is claimed verified but no such command appears in the session's transcript (report the argv you ran, nothing else)" % check)
         elif name == "red-before-build":
-            # the tests this member wrote must fail now: a contract test that passes before the build decides nothing. Not when
+            # the tests this member wrote must prove red now: a contract test that passes before the build decides nothing. Not when
             # the request amends tests the build disputed (`amending`): the build already stands, and the corrected tests may pass
             if request.get("amending"):
                 continue
@@ -671,13 +764,14 @@ def validate(out, member, request, target, stream_text, host, before, protected_
                 if not os.path.exists(p):
                     problems.append("red-before-build: %s does not exist" % t)
                     continue
-                py = "python3" if shutil.which("python3") else "python"
-                done = subprocess.run([py, "-m", "unittest", t], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
-                if done.returncode == 0 and built_before:
+                verdict, detail = unittest_red(target, t)
+                if verdict == "unverified":
+                    problems.append("red-before-build: %s is not verified red — %s" % (t, detail))
+                elif verdict == "green" and built_before:
                     out.setdefault("non-claims", []).append("red-before-build could not decide %s: it passes, and code was already changed "
                                                             "before this call (%s) — an earlier build may be what it passes against"
                                                             % (t, ", ".join(built_before[:6])))
-                elif done.returncode == 0:
+                elif verdict == "green":
                     problems.append("red-before-build: %s passes before the build — it decides nothing" % t)
         elif name == "only-tests-touched":
             after = tree_state(target)

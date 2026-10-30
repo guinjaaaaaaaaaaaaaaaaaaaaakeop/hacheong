@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa: E402  (vendored: the same file in each plugin of this family)
@@ -426,7 +427,7 @@ def red_verdict(report):
 
 
 # Run in the target's interpreter: TestProgram supplies the same file loading as `python -m unittest`.
-# The inherited pipe carries only the report, independently of anything tests print to stdout or stderr.
+# The scratch file carries only the report, independently of anything tests print to stdout or stderr.
 UNITTEST_RED_HARNESS = r'''
 import json
 import os
@@ -465,38 +466,37 @@ class Runner:
         test(result)
         return result
 
-path, fd = sys.argv[1], int(sys.argv[2])
+path, report_path = sys.argv[1], sys.argv[2]
 program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(), exit=False)
 result = program.result
 report = dict(tests_run=result.testsRun, assertion_failures=result.assertion_failures,
               fixture_failures=result.fixture_failures, errors=len(result.errors), skipped=len(result.skipped),
               expected_failures=len(result.expectedFailures), unexpected_successes=len(result.unexpectedSuccesses))
-with os.fdopen(fd, "w", encoding="utf-8") as channel:
+with open(report_path, "w", encoding="utf-8") as channel:
     json.dump(report, channel)
 '''
 
 
 def unittest_red(target, path):
     """Judge one Python unittest file from structured evidence in a fresh process, without target scratch files."""
-    if not path.endswith(".py"):
-        return "unverified", "only Python unittest files are verified automatically"
-    py = "python3" if shutil.which("python3") else "python"
-    read_fd, write_fd = os.pipe()
     try:
-        try:
-            done = subprocess.run([py, "-c", UNITTEST_RED_HARNESS, path, str(write_fd)], cwd=target,
-                                  pass_fds=(write_fd,), capture_output=True)
-        finally:
-            os.close(write_fd)
-        if done.returncode != 0:
-            return "unverified", "unittest harness exited unsuccessfully (%s)" % done.returncode
-        # REPORT is seven integer counters, small enough to fit in the pipe before the process exits.
-        report = json.loads(os.read(read_fd, 65536))
-    except (OSError, ValueError):
+        if not path.endswith(".py"):
+            return "unverified", "only Python unittest files are verified automatically"
+        py = "python3" if shutil.which("python3") else "python"
+        scratch_root = Path(tempfile.gettempdir()).resolve()
+        target_root = Path(target).resolve()
+        if scratch_root == target_root or target_root in scratch_root.parents:
+            scratch_root = target_root.parent
+        with tempfile.TemporaryDirectory(prefix="hacheong-red-", dir=scratch_root) as scratch:
+            report_path = Path(scratch, "report.json")
+            done = subprocess.run([py, "-c", UNITTEST_RED_HARNESS, path, str(report_path)], cwd=target,
+                                  capture_output=True)
+            if done.returncode != 0:
+                return "unverified", "unittest harness exited unsuccessfully (%s)" % done.returncode
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        return red_verdict(report)
+    except Exception:
         return "unverified", "unittest harness did not return a valid JSON report"
-    finally:
-        os.close(read_fd)
-    return red_verdict(report)
 
 
 def transcript_commands(stream_text, host):

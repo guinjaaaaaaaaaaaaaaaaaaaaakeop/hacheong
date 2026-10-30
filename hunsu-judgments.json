@@ -32,10 +32,10 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "24b8418b00e6",
-      "members-text-fingerprint": "acd1c8fe9784",
+      "members-text-fingerprint": "079b9e8779b7",
       "member-fingerprints": {
         "chongdae:run": "da92b1d52a3c",
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hacheong:build": "54499f99f0f0",
         "hacheong:hire": "205dc70c1ed4",
@@ -50,7 +50,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -134,11 +134,11 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "267c2f6fd4d0",
-      "members-text-fingerprint": "f91db5ac11d7",
+      "members-text-fingerprint": "2fc416bb02f8",
       "member-fingerprints": {
         "dwitbuk:eyes": "935c101ee251",
         "dwitbuk:review": "933a42190b12",
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hacheong:hire": "205dc70c1ed4",
         "hacheong:nitpick": "b77e452f3304",
@@ -154,7 +154,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -216,9 +216,9 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "828e9af64603",
-      "members-text-fingerprint": "452e8d6d3aa8",
+      "members-text-fingerprint": "c2edf9c9b903",
       "member-fingerprints": {
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hacheong:hire": "205dc70c1ed4",
         "hacheong:newbie": "91d98dbdc5d0",
@@ -234,7 +234,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -288,10 +288,10 @@
             "hacheong:hire"
           ],
           "quotes": {
-            "file:AGENTS.md": "For behavioral changes, run `python3 test_hacheong.py` from this directory; its self-check uses no model calls.",
+            "file:AGENTS.md": "`python3 -m unittest test_native_prompt.py test_hostcall_env.py test_record_paths.py test_red_gate.py` from this directory ([Self-check](README.md#self-check)); neither makes model calls.",
             "hacheong:hire": "Use when a plan or the lock names a hacheong role (build, quibble, nitpick, newbie) as a task's provider, or when the person asks who can build, dispute, test or try a slice."
           },
-          "why": "In this repository there are two ways to test a change: AGENTS.md says to run the model-free self-check, and the hire skill says to hire the nitpick or newbie member.",
+          "why": "In this source repository there are two ways to test a change. AGENTS.md says to run the self-checks, which make no model calls. The hire skill says to hire the nitpick or newbie member.",
           "proposed": {
             "order": [
               "file:AGENTS.md",
@@ -323,7 +323,7 @@
           "class": "authority"
         }
       ],
-      "findings-fingerprint": "906baaeed146"
+      "findings-fingerprint": "e42e8d643d3d"
     },
     {
       "situation": "after a slice is built",
@@ -341,10 +341,10 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "6c31fdfc8f8c",
-      "members-text-fingerprint": "44a18191a179",
+      "members-text-fingerprint": "280da9884e1b",
       "member-fingerprints": {
         "dwitbuk:review": "933a42190b12",
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hacheong:hire": "205dc70c1ed4",
         "mangsang:operate": "b1da9ac060d5",
@@ -359,7 +359,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -370,10 +370,10 @@
             "plugin:chongdae"
           ],
           "quotes": {
-            "mangsang:operate": "then propose relations in a `proposals.json` — `{\"relations\": [{\"src\", \"predicate\", \"dst\", \"evidence\"}]}` — the slice's section/symbols/tests each `realizes concept:NAME` (evidence quotes the concept's `means` or the projection's text), plus plan-section↔symbol (`documents`) and test↔symbol (`verifies`) where they say more than the concept does.",
+            "mangsang:operate": "then propose relations in a `proposals.json`",
             "plugin:chongdae": "the run is the agent's container, so Edit/Write are refused until one starts"
           },
-          "why": "After a slice is built, mangsang's step writes a proposals.json (and registers files into the net's record), assuming the agent can write files; chongdae's mode refuses Edit/Write when no run is in progress, so the mangsang step is blocked unless the writes are made inside a run.",
+          "why": "After a slice, mangsang:operate has the agent write a proposals.json file into the project and record relations. chongdae refuses Edit/Write when no run is in progress, so writing the proposals file assumes a run is open. If the slice's run has already closed, the write is refused.",
           "proposed": {
             "order": [
               "plugin:chongdae",
@@ -383,11 +383,11 @@
           "class": "sequenced",
           "class_quote": {
             "member": "plugin:chongdae",
-            "quote": "Writes go through this run"
+            "quote": "the run is the agent's container, so Edit/Write are refused until one starts"
           }
         }
       ],
-      "findings-fingerprint": "60e682fbff63"
+      "findings-fingerprint": "69f40e6a0650"
     },
     {
       "situation": "asking what happened or what is open",
@@ -405,11 +405,11 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "48bdf2a4c0a3",
-      "members-text-fingerprint": "2e904a8cd15c",
+      "members-text-fingerprint": "11a54de84dbd",
       "member-fingerprints": {
         "chongdae:run": "da92b1d52a3c",
         "dwitbuk:review": "933a42190b12",
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "jokbo:read": "d24048fadeec",
         "plugin:chongdae": "9de6ee882387",
@@ -423,7 +423,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -483,9 +483,9 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "26b8a09614ed",
-      "members-text-fingerprint": "2acad6924bac",
+      "members-text-fingerprint": "4d3126d74671",
       "member-fingerprints": {
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "jokbo:read": "d24048fadeec",
         "mangsang:operate": "b1da9ac060d5",
@@ -500,7 +500,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
@@ -542,9 +542,9 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "315fa62ceec5",
-      "members-text-fingerprint": "d4c6444cac89",
+      "members-text-fingerprint": "3a886366afe9",
       "member-fingerprints": {
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hunsu:compose": "46ff670a8b94",
         "mangsang:operate": "b1da9ac060d5",
@@ -559,27 +559,47 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [
         {
           "kind": "premise",
           "members": [
-            "hunsu:compose",
-            "mangsang:operate",
-            "plugin:chongdae"
+            "plugin:chongdae",
+            "hunsu:compose"
           ],
           "quotes": {
-            "hunsu:compose": "an edit to `hunsu.json` (`engines`, `resolutions`, `local-hooks-ok` for a hook the whole team runs)",
-            "mangsang:operate": "Write the name into `mangsang/people.json`",
-            "plugin:chongdae": "the run is the agent's container, so Edit/Write are refused until one starts"
+            "plugin:chongdae": "the run is the agent's container, so Edit/Write are refused until one starts",
+            "hunsu:compose": "an edit to `hunsu.json` (`engines`, `resolutions`, `local-hooks-ok` for a hook the whole team runs)"
           },
-          "why": "During first-time setup, both skills write files in the project: compose edits hunsu.json, and operate writes mangsang/people.json. With no run in progress, chongdae's mode refuses Edit/Write until a run starts, so these setup writes are blocked unless a chongdae run is started first.",
+          "why": "When a project is set up for the first time, compose writes hunsu.json and hunsu.local.json. chongdae refuses Edit/Write until a run exists, so compose's edits fail if no run has been started.",
           "proposed": {
             "order": [
               "plugin:chongdae",
-              "hunsu:compose",
+              "hunsu:compose"
+            ]
+          },
+          "class": "sequenced",
+          "class_quote": {
+            "member": "plugin:chongdae",
+            "quote": "the run is the agent's container, so Edit/Write are refused until one starts"
+          }
+        },
+        {
+          "kind": "premise",
+          "members": [
+            "plugin:chongdae",
+            "mangsang:operate"
+          ],
+          "quotes": {
+            "plugin:chongdae": "the run is the agent's container, so Edit/Write are refused until one starts",
+            "mangsang:operate": "Write the name into `mangsang/people.json`"
+          },
+          "why": "When a project first adopts mangsang, operate writes files such as people.json and proposals.json. chongdae refuses Edit/Write until a run is started.",
+          "proposed": {
+            "order": [
+              "plugin:chongdae",
               "mangsang:operate"
             ]
           },
@@ -588,9 +608,32 @@
             "member": "plugin:chongdae",
             "quote": "the run is the agent's container, so Edit/Write are refused until one starts"
           }
+        },
+        {
+          "kind": "premise",
+          "members": [
+            "hunsu:compose",
+            "mangsang:operate"
+          ],
+          "quotes": {
+            "hunsu:compose": "Calls to skills outside the lock are refused by hunsu's own PreToolUse hook.",
+            "mangsang:operate": "when a project first adopts mangsang"
+          },
+          "why": "During first-time setup, operate expects to be callable when the project adopts mangsang. compose's hook refuses any skill that is not in the lock, so operate is refused until mangsang has been added to the manifest and the lock is rebuilt.",
+          "proposed": {
+            "order": [
+              "hunsu:compose",
+              "mangsang:operate"
+            ]
+          },
+          "class": "sequenced",
+          "class_quote": {
+            "member": "hunsu:compose",
+            "quote": "If the user wants such a skill, that is a manifest change: `hunsu add`, then lock again."
+          }
         }
       ],
-      "findings-fingerprint": "43dc9163dcc3"
+      "findings-fingerprint": "4606f6261e54"
     },
     {
       "situation": "agent environment differs from or is missing the lock",
@@ -606,9 +649,9 @@
         "file:AGENTS.md"
       ],
       "members-fingerprint": "1cc4ddc3fc52",
-      "members-text-fingerprint": "e7597682576d",
+      "members-text-fingerprint": "62718da1d1bd",
       "member-fingerprints": {
-        "file:AGENTS.md": "7b024a596bdd",
+        "file:AGENTS.md": "b0582d6cbad2",
         "file:CLAUDE.md": "336cc4fbf19b",
         "hunsu:compose": "46ff670a8b94",
         "plugin:chongdae": "9de6ee882387",
@@ -622,7 +665,7 @@
         "plugin:hunsu": "da5690287625",
         "plugin:jokbo": "24fb1df410b0",
         "file:CLAUDE.md": "336cc4fbf19b",
-        "file:AGENTS.md": "7b024a596bdd"
+        "file:AGENTS.md": "b0582d6cbad2"
       },
       "judged-by": "claude-code claude-opus-5-5",
       "findings": [

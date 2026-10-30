@@ -212,8 +212,8 @@ Semver, and a version names one content: every change to the source — code, ro
 in all three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and the marketplace
 entries before it is used anywhere. **patch**: behavior or wording, every interface unchanged. **minor**: a new
 member, field, validator or domain; what exists keeps working. **major**: the request, the envelope, or `worker`
-changes shape — or a supported Python or host version is dropped. The manifests' `python >=3.11` floor drops 3.9 and
-3.10, so it ships only in a major release (the planned 2.0); this README does not bump the version.
+changes shape — or a supported Python or host version is dropped. 2.0.0 is such a release: it raised the manifests'
+floor to `python >=3.11`, dropping 3.9 and 3.10.
 
 ### Release and adoption
 

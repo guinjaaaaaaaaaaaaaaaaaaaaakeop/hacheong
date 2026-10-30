@@ -1,0 +1,197 @@
+{
+  "engines": {
+    "claude-code": ">=2.1",
+    "python": ">=3.11"
+  },
+  "plugins": {
+    "hunsu": {
+      "version": "1.15.1",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/hunsu",
+      "marketplace": "hunsu"
+    },
+    "chongdae": {
+      "version": "1.24.0",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/chongdae",
+      "marketplace": "chongdae"
+    },
+    "mangsang": {
+      "version": "1.19.3",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/mangsang",
+      "marketplace": "mangsang"
+    },
+    "jokbo": {
+      "version": "1.8.1",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/jokbo",
+      "marketplace": "jokbo"
+    },
+    "hacheong": {
+      "version": "1.12.1",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong",
+      "marketplace": "hacheong"
+    },
+    "dwitbuk": {
+      "version": "1.16.0",
+      "source": "github:guinjaaaaaaaaaaaaaaaaaaaaakeop/dwitbuk",
+      "marketplace": "dwitbuk"
+    }
+  },
+  "roles": {
+    "planner": "session",
+    "implementer": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "dakdol",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "codex"
+    ],
+    "nitpick": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "teujip",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "quibble": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "sibi",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "newbie": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "chojja",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "codex"
+    ],
+    "verifier": [
+      "python3",
+      "{plugin:dwitbuk}/eyes_worker.py",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "reviewer": [
+      "python3",
+      "{plugin:dwitbuk}/dwitbuk.py",
+      "review",
+      "--target",
+      "."
+    ],
+    "coherence": [
+      "python3",
+      "{plugin:mangsang}/mangsang.py",
+      "impact",
+      "--target",
+      "."
+    ]
+  },
+  "reporters": {
+    "chongdae": [
+      "python3",
+      "{plugin:chongdae}/chongdae.py",
+      "report",
+      "--since",
+      "{since}",
+      "--target",
+      "."
+    ],
+    "mangsang-impact": [
+      "python3",
+      "{plugin:mangsang}/mangsang.py",
+      "impact",
+      "--findings",
+      "--target",
+      "."
+    ],
+    "mangsang-check": [
+      "python3",
+      "{plugin:mangsang}/mangsang.py",
+      "check",
+      "--findings",
+      "--target",
+      "."
+    ],
+    "mangsang-cq": [
+      "python3",
+      "{plugin:mangsang}/mangsang.py",
+      "cq",
+      "--findings",
+      "--target",
+      "."
+    ],
+    "hunsu": [
+      "python3",
+      "{plugin:hunsu}/hunsu.py",
+      "check",
+      "--findings",
+      "--target",
+      "."
+    ]
+  },
+  "resolutions": {
+    "executing a plan or a stated goal (building a slice)": {
+      "order": [
+        "hacheong:build",
+        "chongdae:run"
+      ],
+      "accept": "AGENTS.md only says maintenance is not inherently a hiring act; within a chongdae run the lock decides who builds, and a self-performed task needs the person's word via --role session --why",
+      "reviewed": false
+    },
+    "reviewing or disputing a change before merge": {
+      "order": [
+        "hacheong:quibble",
+        "dwitbuk:eyes"
+      ],
+      "accept": "A hand review's reviews/<id>.json is written by the dwitbuk engine, not through Edit/Write; a person decides whether committing it outside a chongdae run is allowed or whether a session run must be started first",
+      "reviewed": false
+    },
+    "testing or trying a built slice": {
+      "order": [
+        "hacheong:nitpick",
+        "hacheong:newbie"
+      ],
+      "accept": "jokbo's hooks give nothing in a worker session (hooks/_common.py: AGENT_WORKER or HUNSU_SURVEY set -> no payload), and hacheong's hostcall.py starts every member, on claude and codex, with AGENT_WORKER=1, so the newbie is handed no jokbo map or file facts",
+      "note": "the session's evidence in place of the judge's proposed deny of plugin:jokbo",
+      "reviewed": false
+    },
+    "asking what happened or what is open": {
+      "order": [
+        "chongdae:run",
+        "dwitbuk:review",
+        "jokbo:read"
+      ],
+      "accept": "dwitbuk's review record is written by its own engine, not by the agent's Edit/Write, and is committed alone as a record commit. Committing it outside a run needs the person's word.",
+      "reviewed": false
+    }
+  },
+  "local-hooks-ok": [],
+  "capabilities": {
+    "loopback": "session",
+    "network": "session"
+  }
+}

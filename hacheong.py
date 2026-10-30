@@ -4,7 +4,7 @@
   check  [--target DIR]            every member is well-formed: ROLE.md, answer.json parses, policy keys and validators known, roles ↔ members 1:1
   new    <name> [--target DIR]     scaffold a member — in this plugin, or in the project's hacheong/members/ with --target
   try    <name> --request FILE [--host claude|codex] [--model M] [--effort E]   run one member on a request; the validated answer, printed
-  prompt <name> --request FILE     the exact prompt worker.py would send (worker.py --prompt-only)
+  prompt <name> --request FILE     the prompt for a session's own subagent (worker.py --prompt-only): its environment section names no sandbox
 
 A member is a directory: `ROLE.md` (who they are, in sentences), `answer.json` (the answer's schema; the envelope
 status/summary/non-claims is always added), `policy.json` (`tools`, `sandbox`, `max-turns`, `validate`: which of the runner's

@@ -73,8 +73,10 @@ answer that broke its own rules is not an answer.
 
 `--prompt-only` prints the role/domain/request and answer schema, then exits — for a session that dispatches its host's
 own subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer verbatim. It does not run capability
-checks, a host session or the post-call validators. Its environment section currently uses the Claude member settings,
-even with `--host codex`; that text is not evidence of the native session's actual tools or capabilities.
+checks, a host session or the post-call validators. Its environment section is the same with `--host claude` or
+`--host codex`: it says the subagent's permissions, tools, network and loopback come from the parent host and its
+configuration, and that the renderer grants nothing. It describes no sandbox and is not evidence of the native
+session's actual tools or capabilities.
 
 ## Validators (the runner's, chosen per member in `policy.json`)
 
@@ -82,7 +84,7 @@ even with `--host codex`; that text is not evidence of the native session's actu
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
 the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
-the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` fails now (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter, it ran at least one test and failed at least one assertion inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
 changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
 uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
@@ -109,9 +111,14 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `--max-turns` and `HACHEONG_CONTINUATIONS` bound Claude calls only. The Codex adapter passes no turn or wall-clock
   limit to `codex exec`; its call ends when the host exits.
-- `red-before-build` currently runs each declared test through `python3 -m unittest` (falling back to `python`).
-  A nonzero exit counts as red; the validator does not distinguish an assertion failure from an import or runner error.
-  It does not select a JavaScript or other test runner from the file extension.
+- `red-before-build` verifies Python `unittest` files only, each run by `python3` (falling back to `python`) through a
+  harness that reports unittest's own result in a scratch file outside the project. A direct script, a pytest-style
+  module, a JavaScript test or any other non-`.py` file is `not verified red` and fails the answer; no other runner is
+  chosen from a file's extension. Such red is for the runner that hired the member to verify itself. A missing feature
+  has to show as a failed assertion: a test that imports a module not yet written errors, and an error is not red. The
+  gate guards against a vacuous red, not a hostile test: code in the test file runs inside the harness, and a file that
+  hangs hangs the call. Releases up to 1.12.1 counted any non-zero exit as red; answers they validated are not
+  re-labelled.
 - Four domains shipped: `code`; `refactor` (placement changes, behavior and explanation do not: the runner compares
   the project's public names, docstrings and comment lines with HEAD and refuses a builder's answer where any shrank —
   `explanation-kept`; the nitpicker adds no placement tests; the eyes are told to look for words the diff removed and
@@ -123,7 +130,8 @@ the validator set. A member may not change these; when they must change, this pl
   instead of acceptance sentences). A member sent at a domain
   with no text works from its role alone and says so.
 - The prompt says where the session runs (`# Where you run`): a Codex `workspace-write` sandbox has no network by default
-  and a read-only `.git`; a Claude Code session has the member's tools only. What the work needs and that place lacks is
+  and a read-only `.git`; a Claude Code session has the member's tools only (a `--prompt-only` prompt says instead that
+  the parent host decides). What the work needs and that place lacks is
   `blocked`, named — never a hand-written lock file or another tool in the named one's place.
 - **What a member can do, and what a task needs.** Each host has a default — Codex: no network, no loopback (a Codex
   sandbox cannot bind a local port: a local server, `wrangler dev`, a fake S3 on 127.0.0.1); Claude Code: both — and a
@@ -165,6 +173,10 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
+  A child host starts without the parent session's identity and project metadata (`CODEX_THREAD_ID`,
+  `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`, `CODEX_VERSION`), with `AGENT_HOST`
+  naming its own host and `AGENT_WORKER=1`; everything else in the environment passes through. The self-check shows
+  this with `subprocess.run` mocked — it is not an observation of a live child host.
 
 - **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
   transcript names (a command it ran, a file it read, edited or wrote); a file changed during the call that the
@@ -177,6 +189,9 @@ the validator set. A member may not change these; when they must change, this pl
   "does not exist"). The build request names them in `deleted-tests`; `tests-kept` holds them deleted.
 - **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
+  `.chongdae/` and the five hunsu files (`hunsu.json`, `hunsu.lock.json`, `hunsu-judgments.json`, `hunsu-conflicts.md`,
+  `hunsu.local.json`) are always records. Paths are taken from the project root: an entry ending in `/` is everything
+  under that directory, any other entry is exactly that file — `hunsu.py` beside `hunsu.json` is the project's.
 - `tests-kept` snapshots each requested test's contents immediately before the host call and compares them after it.
   Committing a modified test, putting it in an ignored nested repository, or working without git does not hide a change.
   Requested tests under record paths are protected too. `no-tree-changes` and `only-tests-touched` still compare git-status
@@ -213,3 +228,7 @@ plugin is not an update procedure for every remote installation.
 real one is `done`, each validator fires on a recorded case, project-local members and domains shadow the plugin's,
 `new` scaffolds something `check` refuses until it is written, a sandbox's refusal recorded in a codex or Claude Code
 stream is said as `lacked` (and a local failure, or a host that can, is not). No model calls.
+
+`python3 -m unittest test_native_prompt.py test_hostcall_env.py test_record_paths.py test_red_gate.py` — the
+`--prompt-only` environment, a child host's identity, the record-path rule and the red-before-build gate.
+`test_hacheong.py` does not run these suites; the self-check is both commands. No model calls.

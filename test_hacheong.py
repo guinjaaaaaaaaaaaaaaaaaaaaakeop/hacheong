@@ -575,9 +575,9 @@ def test_the_tree_checks_leave_out_the_records_the_lock_declares():
     """tree_state and the refactor inventory skipped `.chongdae/ .mangsang/ .dwitbuk/` by name; now the lock's `record-paths`
     says which paths are records (each plugin declares its own), and without a lock the old names stand."""
     with Repo() as r:
-        assert w.record_paths(r.dir) == (".chongdae/", ".dwitbuk/", ".mangsang/", "hunsu", "reviews/"), w.record_paths(r.dir)
+        assert w.record_paths(r.dir) == (".chongdae/", ".dwitbuk/", ".mangsang/", "hunsu-conflicts.md", "hunsu-judgments.json", "hunsu.json", "hunsu.local.json", "hunsu.lock.json", "reviews/"), w.record_paths(r.dir)
         r.write("hunsu.lock.json", json.dumps({"record-paths": {"alpha": [".alpha/"], "beta": []}}))
-        assert w.record_paths(r.dir) == (".alpha/", ".chongdae/", "hunsu"), w.record_paths(r.dir)
+        assert w.record_paths(r.dir) == (".alpha/", ".chongdae/", "hunsu-conflicts.md", "hunsu-judgments.json", "hunsu.json", "hunsu.local.json", "hunsu.lock.json"), w.record_paths(r.dir)
         r.write(".alpha/state.json", "{}")
         r.write("app.py", "x = 1\n")
         state = w.tree_state(r.dir)

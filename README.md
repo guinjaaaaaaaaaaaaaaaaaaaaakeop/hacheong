@@ -84,7 +84,7 @@ session's actual tools or capabilities.
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
 the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
-the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter, it ran at least one test and failed at least one assertion inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter, it ran at least one test and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
 changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
 uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
@@ -115,7 +115,9 @@ the validator set. A member may not change these; when they must change, this pl
   harness that reports unittest's own result in a scratch file outside the project. A direct script, a pytest-style
   module, a JavaScript test or any other non-`.py` file is `not verified red` and fails the answer; no other runner is
   chosen from a file's extension. Such red is for the runner that hired the member to verify itself. A missing feature
-  has to show as a failed assertion: a test that imports a module not yet written errors, and an error is not red. The
+  has to show as a failed assertion — an `AssertionError` (or a subclass) raised in a test body: a test that imports a
+  module not yet written errors, an error is not red, and a TestCase that widens `failureException` beyond
+  `AssertionError` does not turn another exception into one (that failure counts as an error). The
   gate guards against a vacuous red, not a hostile test: code in the test file runs inside the harness, and a file that
   hangs hangs the call. Releases up to 1.12.1 counted any non-zero exit as red; answers they validated are not
   re-labelled.
@@ -173,10 +175,15 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
-  A child host starts without the parent session's identity and project metadata (`CODEX_THREAD_ID`,
-  `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`, `CODEX_VERSION`), with `AGENT_HOST`
-  naming its own host and `AGENT_WORKER=1`; everything else in the environment passes through. The self-check shows
-  this with `subprocess.run` mocked — it is not an observation of a live child host.
+  A child host starts without exactly six variables this family reads for host and session attribution
+  (`CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`, `CODEX_VERSION`),
+  with `AGENT_HOST` naming its own host and `AGENT_WORKER=1`. Every other variable — configuration, credentials and
+  other metadata — passes through on purpose; this is not a promise that every variable that looks like an identity is
+  removed (`CODEX_SESSION_ID`, `CODEX_TOOL_CALL_ID` and `CODEX_CI`, which nothing in this family reads, are kept). The
+  self-check shows it with `subprocess.run` mocked. Separately, this `hostcall.py` (sha256 `fa06077c…`) was run once
+  against the real Claude Code and Codex CLIs in a disposable fixture: the parent's six markers were gone, `AGENT_HOST`
+  and `AGENT_WORKER` were the child's, each CLI set its own session ids, the fixture was unchanged. That shows the
+  adapter in real CLI environments — not an installed plugin, project hooks, a release or its adoption.
 
 - **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
   transcript names (a command it ran, a file it read, edited or wrote); a file changed during the call that the
@@ -190,8 +197,9 @@ the validator set. A member may not change these; when they must change, this pl
 - **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
   `.chongdae/` and the five hunsu files (`hunsu.json`, `hunsu.lock.json`, `hunsu-judgments.json`, `hunsu-conflicts.md`,
-  `hunsu.local.json`) are always records. Paths are taken from the project root: an entry ending in `/` is everything
-  under that directory, any other entry is exactly that file — `hunsu.py` beside `hunsu.json` is the project's.
+  `hunsu.local.json`) are always records. Paths are taken from the project root: an entry ending in `/` is that
+  directory — its own path and everything under it, not `reviews-old` beside `reviews/` — and any other entry is exactly
+  that file, never a directory or a prefix: `hunsu.py` beside `hunsu.json` is the project's.
 - `tests-kept` snapshots each requested test's contents immediately before the host call and compares them after it.
   Committing a modified test, putting it in an ignored nested repository, or working without git does not hide a change.
   Requested tests under record paths are protected too. `no-tree-changes` and `only-tests-touched` still compare git-status
@@ -204,7 +212,8 @@ Semver, and a version names one content: every change to the source — code, ro
 in all three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and the marketplace
 entries before it is used anywhere. **patch**: behavior or wording, every interface unchanged. **minor**: a new
 member, field, validator or domain; what exists keeps working. **major**: the request, the envelope, or `worker`
-changes shape.
+changes shape — or a supported Python or host version is dropped. The manifests' `python >=3.11` floor drops 3.9 and
+3.10, so it ships only in a major release (the planned 2.0); this README does not bump the version.
 
 ### Release and adoption
 

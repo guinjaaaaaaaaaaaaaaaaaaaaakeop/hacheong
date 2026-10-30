@@ -1,0 +1,51 @@
+{
+  "artifact-type": "chongdae/request@1",
+  "written_by": "chongdae 1.24.0",
+  "stage": "build",
+  "run": "run-20261030-075816-5828",
+  "task": "b-redgate-build",
+  "role": "implementer",
+  "target": ".",
+  "goal": "The red-before-build gate counts a test file as red only on structured unittest evidence of genuine assertion failures with no errors",
+  "brief": "Change worker.py, and only worker.py, so that every sentence G1-G8 below holds: add red_verdict(report) and unittest_red(target, path), and have the red-before-build validator judge each declared test file with unittest_red. The harness runs in its own interpreter process with cwd=target, loads the file as `python -m unittest <path>` does, builds REPORT from a TestResult (an assertion failure counts as a body failure only when its traceback passes through the test method's own code; failing subTests count; everything else unittest records as an error is an error), and hands REPORT back to the parent by a channel that is not unittest's printed output and leaves no file inside target. Keep enforcement inside worker.py (the harness may be source held in worker.py and run with the interpreter's -c); import nothing from another plugin; keep hostcall.py untouched. test_red_gate.py and test_hacheong.py (written and amended to this contract by the tests writer, committed), test_record_paths.py, test_native_prompt.py and test_hostcall_env.py are the protected tests: do not change any of them. The contract fixes REPORT's keys, red_verdict's rule order, the problem and non-claim wordings and the preserved behaviours, so no behaviour choice should be left to you; keep docstrings and comments true in the file's existing style. Do not touch hacheong.py, README.md, skills/, members/, domains/ or any manifest; add no timeout, runner option or CLI flag.\n\nCONTRACT B (sentences G1-G8). Defect: worker.py's red-before-build runs `python3 -m unittest <test file>` and takes ANY non-zero exit as proof the file is red — an import error, a syntax error, a loader error, a module with no tests (exit 5), a crash. Fix, bounded: unittest stays the only runner verified automatically; the verdict comes from a structured report built from unittest's own TestResult; red requires at least one test actually run and at least one genuine assertion failure inside a test body, with no error of any kind. No runner is chosen from a file's extension; no new runner protocol; the answer schema and envelope, `lacked` and the unmet-capability reporting stay as they are.\n\nREPORT = the JSON object the harness writes, exactly these seven keys, each a non-negative int (a bool is not an int here): \"tests_run\" (unittest's testsRun), \"assertion_failures\" (failures whose traceback passes through the test method's own code — including a failing subTest inside it), \"fixture_failures\" (assertion failures raised outside the test method's body: setUp, tearDown, a cleanup), \"errors\" (every error unittest records — import, syntax and loader errors (unittest's _FailedTest), setUpClass/setUpModule/tearDown*Class/Module errors, and any non-assertion exception in setUp, a test body, a subTest or tearDown, SystemExit included), \"skipped\", \"expected_failures\", \"unexpected_successes\".\n\nG1. worker.red_verdict(report) -> (verdict, detail), verdict one of \"red\", \"green\", \"unverified\", detail a non-empty str. Anything but a dict holding all seven REPORT keys as non-negative ints (None, a str, a list, {}, a missing key, a str/float/bool/negative value) -> \"unverified\". Otherwise, in this order: errors > 0 -> \"unverified\"; fixture_failures > 0 -> \"unverified\" (an assertion failed outside a test body: it does not show the contract's test ran); tests_run == 0 -> \"unverified\" (detail names unittest: only unittest TestCase tests are verified); assertion_failures >= 1 -> \"red\"; else -> \"green\" (passes, or only skips, expected failures or unexpected successes — none of which proves red).\nG2. worker.unittest_red(target, path) -> (verdict, detail) runs one test file, `path` relative to `target`, in a fresh interpreter process (\"python3\" when on PATH, else \"python\", as today) with cwd=target and the file loaded the way `python -m unittest <path>` loads it (the target first on sys.path); a harness inside that process runs it with a TestResult that builds REPORT and hands REPORT back to the parent outside unittest's text output; the verdict is red_verdict(REPORT) — never the exit code alone and never a pattern matched in unittest's printed output. A harness process that exits non-zero or is killed, or that hands back no report or one that is not well-formed JSON (e.g. a test calls os._exit), gives \"unverified\". A path that does not end in \".py\" is not run at all: \"unverified\", detail naming unittest (only Python unittest files are verified automatically; a direct script, pytest or a JavaScript test is not run here). The gate writes nothing inside `target` beyond what importing the tests writes (no report file, no scratch there; `git status` shows nothing new besides __pycache__).\nG3. On real fixture files (temporary directories), unittest_red gives: \"red\" for a TestCase whose test body fails an assertion (self.fail, self.assertEqual, a bare `assert`, a failing subTest), also when other tests in the file pass or are skipped; \"green\" for all-passing tests, and for a file whose only non-passing outcomes are skips or expected failures; \"unverified\" for: an import of a missing module at the top of the file; a syntax error; an error raised inside a test body (NameError, ZeroDivisionError, an `import` of a missing module inside the test); setUp raising an error; setUp failing an assertion; tearDown raising an error or failing an assertion; setUpClass or setUpModule raising; sys.exit() inside a test; os._exit() inside a test (no report); a module with no TestCase tests (functions only, or a direct script that runs code at import); one genuine assertion failure in a file that also has any error; a path not ending in \".py\".\nG4. validate(), for a member whose policy has red-before-build (teujip), judges each file in the answer's `tests` with unittest_red: \"red\" passes; \"green\" is the existing problem \"red-before-build: <path> passes before the build — it decides nothing\" (wording unchanged), or — when code was already changed before the call (the existing built_before case) — the existing non-claim \"red-before-build could not decide <path>: it passes, and code was already changed before this call (…)\" with status unchanged; \"unverified\" is a new problem \"red-before-build: <path> is not verified red — <detail>\", whatever built_before says. Each problem makes the answer \"failed\" with \"red-before-build\" in validation.failed, as today.\nG5. Kept as they are (preservation): a request with `amending` skips the gate; a declared test its writer deleted is said as \"deleted by the writer: <path> — the contract retires it\" and skipped; a path in the request's `deleted-tests` that is absent is skipped; a declared test that never existed is the problem \"red-before-build: <path> does not exist\".\nG6. The historical record is not rewritten: nothing re-labels an earlier answer; the gate judges only the call it runs in.\nG7. Nothing else changes: only worker.py changes; no answer schema, envelope, `lacked` or `needs` behaviour changes; other validators (no-tree-changes, only-tests-touched, checks-ran, tests-kept, explanation-kept, quotes-required, readme-only) behave as before; the record-path rule of the previous slice stays; test_record_paths.py, test_native_prompt.py and test_hostcall_env.py keep passing.\nG8. No timeout or runner option is added (a test file that hangs hangs the call, as today); hostcall.py is not touched.",
+  "closes": [],
+  "contract": {},
+  "checks": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_red_gate.py"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_record_paths.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_hostcall_env.py"
+    ]
+  ],
+  "tests": [
+    "test_red_gate.py",
+    "test_hacheong.py",
+    "test_record_paths.py",
+    "test_native_prompt.py",
+    "test_hostcall_env.py"
+  ],
+  "response": "./.chongdae/run-20261030-075816-5828/local/b-redgate-build.response.json"
+}

@@ -1,0 +1,272 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "a-record-build",
+    "role": "implementer",
+    "brief": "Change worker.py, and only worker.py, so that every sentence R1-R7 below holds: record_paths() stops adding the bare \"hunsu\" and adds the five ENV files instead, and one record-matching rule (exact file; directory at a path boundary; anchored at the project root) is used by tree_state() and by inventory() for HEAD and for the working tree — matching each file's true path relative to the project root, so a record inside a dot-directory matches. Keep inventory's traversal and its existing non-record skips; no traversal redesign; no import of any other plugin. test_record_paths.py and test_hacheong.py (written and amended to this contract by the tests writer, committed), test_native_prompt.py and test_hostcall_env.py are the protected tests: do not change any of them. The contract fixes record_paths()'s exact tuples, the matching rule and the root anchoring, so no behaviour choice should be left to you; keep docstrings and comments true of the new rule in the file's existing style. Do not touch hostcall.py, hacheong.py, README.md, skills/, members/, domains/ or any manifest.\n\nCONTRACT A (sentences R1-R7). Defect: worker.record_paths() always adds a bare \"hunsu\" and tree_state() leaves out every path that startswith() any record entry, so source files hunsu.py, hunsu_helper.py and hunsu-notes.md are hidden as if they were environment records, and a declared record file hides its prefix neighbours (e.g. declared \"hunsu.json\" hides \"hunsu.json.bak\"). The refactor inventory, meanwhile, skips record directories wherever they appear in the tree and never skips an exact record file. Fix: one exact-file versus directory-boundary rule, applied by every consumer of record_paths(). No traversal redesign, no import of any sibling plugin's module.\n\nENV = the five hunsu environment files, exactly: hunsu.json, hunsu.lock.json, hunsu-judgments.json, hunsu-conflicts.md, hunsu.local.json.\n\nR1. record_paths(target) returns a sorted tuple of unique strings: \".chongdae/\" and the five ENV files always; plus every path the lock's `record-paths` mapping declares (the union of its values) — or, when hunsu.lock.json has no `record-paths` mapping (no lock, unreadable JSON, or `record-paths` not a dict), the fallback \".mangsang/\", \".dwitbuk/\", \"reviews/\". It never contains a bare \"hunsu\" or any other entry. Exactly: with no lock -> (\".chongdae/\", \".dwitbuk/\", \".mangsang/\", \"hunsu-conflicts.md\", \"hunsu-judgments.json\", \"hunsu.json\", \"hunsu.local.json\", \"hunsu.lock.json\", \"reviews/\"); with a lock {\"record-paths\": {\"alpha\": [\".alpha/\"], \"beta\": []}} -> (\".alpha/\", \".chongdae/\", \"hunsu-conflicts.md\", \"hunsu-judgments.json\", \"hunsu.json\", \"hunsu.local.json\", \"hunsu.lock.json\").\nR2. The rule. Paths are relative to the project root, with \"/\" separators, and record entries are anchored at that root. An entry ending in \"/\" is a directory record: it covers every path under it, at any depth (declared \"reviews/\" covers \"reviews/a.json\" and \"reviews/x/y.json\"), and never a sibling that merely shares its prefix (\"reviews-old/a.json\", \"reviewsx/a.py\", \"reviews.md\") nor a same-named directory deeper in the tree (\"docs/reviews/a.json\", \"app/reviews/models.py\"); a nested declared directory follows the same boundary (declared \"docs/rec/\" covers \"docs/rec/x.json\", not \"docs/record/x.json\" nor \"docs/rec.md\"). An entry without a trailing \"/\" is a file record: it covers exactly that one path — never a prefix neighbour (\"hunsu.json.bak\", \"hunsu.jsonx\", \"notes.rec.bak\", \"notes.recx\" next to declared \"notes.rec\") nor the same name deeper in the tree (\"sub/hunsu.json\").\nR3. tree_state(target) leaves out exactly the paths R2 says are records (besides what it already leaves out: __pycache__ paths, .pyc and .DS_Store). So hunsu.py, hunsu_helper.py, hunsu-notes.md, prefix neighbours of declared files and directories, and same-named paths deeper in the tree appear in its state when created or changed, while the five ENV files, anything under \".chongdae/\" and every declared record stay out.\nR4. inventory(target, at_head) leaves out the same records by the same rule, for at_head=True (git HEAD) and at_head=False (the working tree) alike — directory records and exact file records both: a declared exact Python record file (e.g. \"gen_record.py\", or \".tool/gen_record.py\" inside a dot-directory) is counted in neither, while its neighbour \"gen_record_tool.py\", hunsu.py, hunsu_helper.py and \"app/reviews/models.py\" (a same-named directory deeper in the tree than a declared \"reviews/\") are counted in both. Its existing non-record skips stay as they are (\".git/\", \"__pycache__/\", \".venv/\", \"tests/\", \"test/\" wherever they appear). Parity: for a committed tree with no uncommitted changes, inventory(target, True) == inventory(target, False), with records, record neighbours and dot-directories present.\nR5. The validators see what R3 shows. A member whose policy has no-tree-changes (e.g. sibi) and whose call changed hunsu.py, hunsu_helper.py or hunsu-notes.md is failed (status \"failed\", \"no-tree-changes\" in validation.failed); a member with only-tests-touched (e.g. teujip) whose call changed hunsu_helper.py outside the tests it declared is failed with the non-claim \"only-tests-touched: changed outside the tests it declared: hunsu_helper.py\" (no transcript, or one that names the file). A call that changed only an ENV file (e.g. hunsu.lock.json or hunsu-conflicts.md) or a file under \".chongdae/\" or a declared record directory fails neither validator.\nR6. Protected tests keep their protection (preservation): tests-kept still compares each requested test's contents from before and after the call, so a build that changes a requested test is refused even when the test sits at a record path (e.g. under \".chongdae/\" or a declared record directory) or is committed.\nR7. Nothing else changes (preservation): worker.py imports nothing from a sibling plugin; red-before-build, checks-ran, quotes-required and explanation-kept behave as before apart from seeing the newly visible paths; test_native_prompt.py and test_hostcall_env.py keep passing.",
+    "closes": [],
+    "needs": [],
+    "checks": [
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_record_paths.py"
+      ],
+      [
+        "python3",
+        "test_hacheong.py"
+      ],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_native_prompt.py"
+      ],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_hostcall_env.py"
+      ]
+    ],
+    "tests": [
+      "test_record_paths.py",
+      "test_hacheong.py",
+      "test_native_prompt.py",
+      "test_hostcall_env.py"
+    ],
+    "gate": null,
+    "scope": [
+      "worker.py"
+    ]
+  },
+  "seq": 2,
+  "added": "2026-10-30T07:53:35+00:00",
+  "response": {
+    "status": "done",
+    "summary": "Changed only worker.py: added the five ENV records, unified root-anchored record matching, and preserved dot-directory paths in inventory. All requested checks passed.",
+    "verified": [
+      {
+        "check": "python3 -m unittest test_record_paths.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 test_hacheong.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 -m unittest test_native_prompt.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 -m unittest test_hostcall_env.py",
+        "exit": 0
+      },
+      {
+        "check": "git diff --check",
+        "exit": 0
+      }
+    ],
+    "decisions": [],
+    "non-claims": [
+      "Record-path tests emitted ResourceWarnings for existing unclosed-file reads; these were outside the requested change."
+    ],
+    "disputed-tests": [],
+    "worker": {
+      "host": "codex",
+      "model": "gpt-6-astra",
+      "effort": "medium"
+    }
+  },
+  "answered": {
+    "at": "2026-10-30T07:54:35+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "touched_by_provider": [
+    "worker.py"
+  ],
+  "performed_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "dakdol",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "codex"
+    ],
+    "host": "codex",
+    "model": "gpt-6-astra",
+    "effort": "medium",
+    "versions": {
+      "used": {
+        "hacheong": "1.12.1",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "update ./worker.py"
+      ],
+      "commands-run": 10,
+      "commands-failed": 0
+    }
+  },
+  "non-claims": [
+    "(provider) Record-path tests emitted ResourceWarnings for existing unclosed-file reads; these were outside the requested change."
+  ],
+  "checks-passed": {
+    "ran": [
+      {
+        "command": "python3 -m unittest test_record_paths.py",
+        "exit": 0,
+        "tail": [
+          "ResourceWarning: Enable tracemalloc to get the object allocation traceback",
+          "./worker.py:376: ResourceWarning: unclosed file <_io.BufferedReader name='<tmp>'>",
+          "  state[path] = hashlib.sha1(open(full, \"rb\").read()).hexdigest() if os.path.isfile(full) else \"gone\"",
+          "ResourceWarning: Enable tracemalloc to get the object allocation traceback",
+          "Ran 35 tests in 7.589s",
+          "OK"
+        ],
+        "at": "2026-10-30T07:54:43+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 test_hacheong.py",
+        "exit": 0,
+        "tail": [
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "done (dakdol, code) -> <tmp>",
+          "PASS test_worker_protects_tests_across_commits_ignored_nested_repos_and_non_git_targets",
+          "all passed"
+        ],
+        "at": "2026-10-30T07:54:46+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 -m unittest test_native_prompt.py",
+        "exit": 0,
+        "tail": [
+          "Ran 15 tests in 4.093s",
+          "OK"
+        ],
+        "at": "2026-10-30T07:54:50+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 -m unittest test_hostcall_env.py",
+        "exit": 0,
+        "tail": [
+          "Ran 30 tests in 0.017s",
+          "OK"
+        ],
+        "at": "2026-10-30T07:54:50+00:00",
+        "chongdae": "chongdae 1.24.0"
+      }
+    ],
+    "at": "2026-10-30T07:54:50+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "review": {
+    "artifact-type": "dwitbuk/review@1",
+    "verdict": "accept",
+    "findings": [],
+    "worker": {
+      "host": "claude-code",
+      "model": "claude-opus-5-5",
+      "turns": 5,
+      "cost_usd": 0.13603600000000002
+    }
+  },
+  "verdict-given": {
+    "at": "2026-10-30T07:55:09+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "reviewed_tree": {
+    ".claude-plugin/plugin.json": "d42cd643206c25d4b7887935b500309ec2b6254c",
+    ".codex-plugin/plugin.json": "9315e4c487fc1823410676b0920a707054f252ac",
+    ".gitignore": "2968d098301bcdb7ab346290f4da4c2299e4d628",
+    "README.md": "d4b47d8d1237d356ef761b92aeb25f82eacd5bfc",
+    "plugin.json": "48a0a50ce74316749adfcb4a65e12cb3eb9e4710",
+    "skills/hire/SKILL.md": "8de83c0b8f3d3cad06ace6bb24be314dc1d6776e",
+    "worker.py": "dba17c833efc6c4ce9f9900933b2c0526ca0bef8",
+    "AGENTS.md": "8ad8f18d142a7e5d34bfd82b9f9743892fcc1214",
+    "CLAUDE.md": "c140473a3a5fbe89301c99d9d0d1b76c5971f2c3"
+  },
+  "verified_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:dwitbuk}/eyes_worker.py",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "host": "claude-code",
+    "model": "claude-opus-5-5",
+    "turns": 5,
+    "cost_usd": 0.13603600000000002,
+    "versions": {
+      "used": {
+        "dwitbuk": "1.16.0",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [],
+      "commands-run": 0,
+      "commands-failed": 0
+    }
+  },
+  "seen-non-claims": {
+    "by": "verifier of a-record-build",
+    "texts": [
+      "(provider) Record-path tests emitted ResourceWarnings for existing unclosed-file reads; these were outside the requested change."
+    ],
+    "at": "2026-10-30T07:55:09+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "checks": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_record_paths.py"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_hostcall_env.py"
+    ]
+  ],
+  "touched": [
+    "worker.py"
+  ],
+  "done": {
+    "at": "2026-10-30T07:55:09+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

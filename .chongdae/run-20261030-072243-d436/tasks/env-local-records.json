@@ -1,0 +1,74 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "env-local-records",
+    "role": "session",
+    "brief": "Environment for this run: this machine's overlay sets settings.chongdae.commit-records to false, so raw run records (worker answers that may hold machine paths) are written locally and not committed until a reviewed public projection exists; ownership, guards and review stay enabled. The project's hunsu environment declaration and lock from the bootstrap session are adopted here so they can be committed apart from any record.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      ".claude/settings.json",
+      "hunsu-judgments.json",
+      "hunsu.json",
+      "hunsu.local.json",
+      "hunsu.lock.json"
+    ]
+  },
+  "seq": 1,
+  "added": "2026-10-30T07:23:07+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so"
+  ],
+  "adopted": [
+    {
+      "by": {
+        "agent": "claude-code claude-opus-5-5"
+      },
+      "why": "The project's hunsu environment (declaration, lock, judge's judgments, enabled plugins) was written by the earlier bootstrap session before this run existed and is untracked; the owner's task brief names environment adoption among what this run may commit. Adopted by the session; the hunsu resolutions inside stay reviewed:false, as written.",
+      "files": [
+        ".claude/settings.json",
+        "hunsu-judgments.json",
+        "hunsu.json",
+        "hunsu.lock.json"
+      ],
+      "at": "2026-10-30T07:23:36+00:00",
+      "chongdae": "chongdae 1.24.0"
+    }
+  ],
+  "checks": [],
+  "touched": [
+    ".claude/settings.json",
+    "hunsu-judgments.json",
+    "hunsu.json",
+    "hunsu.lock.json"
+  ],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "edit ./hunsu.local.json"
+      ],
+      "commands-run": 4,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T07:23:07+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T07:23:43+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

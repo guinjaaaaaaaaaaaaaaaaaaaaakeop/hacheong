@@ -1,0 +1,60 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "c-doc-repairs",
+    "role": "session",
+    "brief": "Owner-authorized documentation follow-through for the repaired behaviour, narrowly: README's --prompt-only paragraph (no longer the Claude environment), the red-before-build validator description and limits (unittest-only, structured evidence, unsupported runners not verified, earlier answers not re-labelled), the record-path rule (exact files, directory boundaries), the hostcall child identity with the note that mocked tests are not a live child observation, and the Self-check section plus AGENTS.md naming every required suite command; hacheong.py's prompt-command description (the native prompt, not the subprocess prompt); domains/code/DOMAIN.md's teujip sentence on failing for the right reason, matched to the gate. Surrounding text is kept; nothing unrelated is rewritten.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      "AGENTS.md",
+      "README.md",
+      "domains/code/DOMAIN.md",
+      "hacheong.py"
+    ]
+  },
+  "seq": 2,
+  "added": "2026-10-30T08:21:36+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so"
+  ],
+  "checks": [],
+  "touched": [
+    "AGENTS.md",
+    "README.md",
+    "domains/code/DOMAIN.md",
+    "hacheong.py"
+  ],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "edit ./README.md",
+        "edit ./AGENTS.md",
+        "edit ./hacheong.py",
+        "edit ./domains/code/DOMAIN.md"
+      ],
+      "commands-run": 3,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T08:21:36+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T08:23:44+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

@@ -1,0 +1,248 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "hostcall-env-build",
+    "role": "implementer",
+    "brief": "Change hostcall.py, and only hostcall.py, so that every sentence H1-H6 below holds: add a small self-contained worker_env(host) and have both run_codex and run_claude pass its result (run_claude with CLAUDE_CODE_DISABLE_AUTO_MEMORY=\"1\" on top, as today) as subprocess.run's env. test_hostcall_env.py (written to this contract by the tests writer, committed), test_native_prompt.py and test_hacheong.py are the protected tests: do not change any of them. The contract fixes the six removed keys, the AGENT_HOST values, AGENT_WORKER, the auto-memory rule, ValueError for any other host, and that argv, keyword arguments, return values, claude_answer and worker_record are unchanged, so no behaviour choice should be left to you. Never mutate os.environ; keep CLAUDECODE, credentials, PATH/HOME/config, AGENT_CODEX_SANDBOX and every other parent value exactly as the parent has them. Keep hostcall.py importing only the standard library. Update run_claude's docstring sentence about the env (and add one for worker_env) in the file's existing style; leave the module docstring as it is. Do not touch worker.py, hacheong.py, README.md, skills/, members/, domains/, any manifest, or anything outside this repository; add no CLI option, host or model override, and change no sandbox or permission.\n\nCONTRACT (sentences H1-H6). Defect: hostcall.run_codex and hostcall.run_claude start the child host with the parent's whole environment (dict(os.environ, ...)), so a child inherits the parent session's identity and project metadata. Reproduced with subprocess.run mocked, no model call: run_codex launched with AGENT_HOST=claude-code and inherited CODEX_THREAD_ID=parent-codex, CLAUDE_CODE_SESSION_ID=parent-claude, CHONGDAE_SESSION=parent-override; run_claude likewise inherited the parent session ids. That contaminates the child's host/session attribution and ownership.\n\nIDENTITY = exactly these six keys: CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID, CHONGDAE_SESSION, AI_AGENT, CLAUDE_PROJECT_DIR, CODEX_VERSION.\nP = the parent's environment (os.environ) at the moment of the call. \"P minus IDENTITY\" = P with those six keys removed (a key P lacks is simply absent).\n\nH1. hostcall.py has a self-contained function worker_env(host) (no import of any other plugin or of worker.py): for host \"codex\" it returns a new dict equal to (P minus IDENTITY) plus AGENT_HOST=\"codex\" and AGENT_WORKER=\"1\"; for host \"claude\" it returns a new dict equal to (P minus IDENTITY) plus AGENT_HOST=\"claude-code\" and AGENT_WORKER=\"1\"; any other host value raises ValueError. It never changes os.environ.\nH2. run_codex passes subprocess.run an env equal to exactly (P minus IDENTITY) plus AGENT_HOST=\"codex\" and AGENT_WORKER=\"1\" — nothing else added, removed or changed: CLAUDE_CODE_DISABLE_AUTO_MEMORY is not added (a value P has is kept as it is).\nH3. run_claude passes subprocess.run an env equal to exactly (P minus IDENTITY) plus AGENT_HOST=\"claude-code\", AGENT_WORKER=\"1\" and CLAUDE_CODE_DISABLE_AUTO_MEMORY=\"1\" (overriding any value P has, e.g. \"0\") — nothing else added, removed or changed.\nH4. Both hold whatever the parent is: a Claude Code parent (AGENT_HOST=claude-code, CLAUDE_CODE_SESSION_ID, AI_AGENT, CLAUDE_PROJECT_DIR, CLAUDECODE=1) or a Codex parent (AGENT_HOST=codex, CODEX_THREAD_ID, CODEX_VERSION) launching a child of the other host (cross-host) or of its own host (same-host); a mixed parent carrying both hosts' ids plus CHONGDAE_SESSION=parent-override and AGENT_HOST=claude-code (the reproduction); and a parent with none of them. AGENT_HOST is always the child's host, never the parent's. Only IDENTITY is removed: CLAUDECODE (the nesting guard) stays exactly as P has it — present with its value when P has it, absent when P lacks it, never added or removed by hostcall; so do credentials (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, CODEX_API_KEY — synthetic values in tests), host/config/home settings (HOME, PATH, CODEX_HOME, AGENT_CODEX_HOME, CLAUDE_CONFIG_DIR), the sandbox setting AGENT_CODEX_SANDBOX, model/effort knobs (e.g. ANTHROPIC_MODEL, CLAUDE_CODE_USE_BEDROCK, CODEX_MODEL) and unrelated values, including near-miss names such as CODEX_THREAD_ID_NOTE or CHONGDAE_WAIT.\nH5. The parent's os.environ is never mutated: dict(os.environ) is the same before and after run_codex, after run_claude, and after both called one after the other; the env object passed to subprocess.run is not os.environ itself.\nH6. Nothing else about the calls changes (preservation). run_claude calls subprocess.run(cmd, input=prompt.encode(\"utf-8\"), capture_output=True, cwd=cwd, env=...) with cmd = [\"claude\", \"-p\", \"--output-format\", \"stream-json\", \"--verbose\", \"--no-session-persistence\", \"--setting-sources\", \"\", \"--strict-mcp-config\", \"--tools\", tools, \"--allowedTools\", tools, \"--max-turns\", str(max_turns), \"--json-schema\", json.dumps(schema)] + ([\"--model\", model] if model) + ([\"--effort\", effort] if effort) + [\"--add-dir\", d] for each add_dir + ([\"--permission-mode\", \"bypassPermissions\"] if bypass), and returns (returncode, stdout, stderr) decoded as UTF-8 with \"replace\". run_codex calls subprocess.run(cmd, input=prompt.encode(\"utf-8\"), capture_output=True, env=...) with cmd = [shutil.which(\"codex\") or \"codex\", \"exec\", \"--json\", \"-C\", cwd, \"-s\", (P's AGENT_CODEX_SANDBOX or sandbox), \"--skip-git-repo-check\", \"--output-schema\", schema_path, \"-o\", last_path] + ([\"-m\", model] if model) + ([\"-c\", \"model_reasoning_effort=\" + json.dumps(effort)] if effort) + [\"--add-dir\", d] for each add_dir + [\"-\"], where with beside=<path>.json schema_path is <path>.schema.json (holding json.dumps(schema)) and last_path is <path>.last.txt; it returns (returncode, stdout, stderr, the text of last_path or None when that file is absent). claude_answer and worker_record are unchanged.\n\nOut of scope: worker.py, hacheong.py, README.md, skills/, members/, domains/, manifests, and the sibling plugins' copies of hostcall.py (hunsu, mangsang, dwitbuk sync later after their own review; the umbrella's tools/same-file.py is expected to report this copy as different until then). test_hacheong.py and test_native_prompt.py stay as they are and keep passing.",
+    "closes": [],
+    "needs": [],
+    "checks": [
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_hostcall_env.py"
+      ],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_native_prompt.py"
+      ],
+      [
+        "python3",
+        "test_hacheong.py"
+      ]
+    ],
+    "tests": [
+      "test_hostcall_env.py",
+      "test_native_prompt.py",
+      "test_hacheong.py"
+    ],
+    "gate": null,
+    "scope": [
+      "hostcall.py"
+    ]
+  },
+  "seq": 2,
+  "added": "2026-10-30T07:40:08+00:00",
+  "response": {
+    "status": "done",
+    "summary": "Updated only hostcall.py with worker_env(host), wired both host calls to it, and updated the requested docstrings. All required checks passed.",
+    "verified": [
+      {
+        "check": "python3 -m unittest test_hostcall_env.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 -m unittest test_native_prompt.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 test_hacheong.py",
+        "exit": 0
+      },
+      {
+        "check": "git diff --check",
+        "exit": 0
+      }
+    ],
+    "decisions": [],
+    "non-claims": [
+      "No live model calls were tested.",
+      "Existing changes outside hostcall.py were left untouched; protected tests were not edited."
+    ],
+    "disputed-tests": [],
+    "worker": {
+      "host": "codex",
+      "model": "gpt-6-astra",
+      "effort": "medium"
+    }
+  },
+  "answered": {
+    "at": "2026-10-30T07:40:56+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "touched_by_provider": [
+    "hostcall.py"
+  ],
+  "performed_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "dakdol",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "codex"
+    ],
+    "host": "codex",
+    "model": "gpt-6-astra",
+    "effort": "medium",
+    "versions": {
+      "used": {
+        "hacheong": "1.12.1",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "update ./hostcall.py"
+      ],
+      "commands-run": 7,
+      "commands-failed": 0
+    }
+  },
+  "non-claims": [
+    "(provider) No live model calls were tested.",
+    "(provider) Existing changes outside hostcall.py were left untouched; protected tests were not edited.",
+    "(verifier) accepted without reading the tree: the eyes opened no file and ran no command — the verdict rests on the packet alone"
+  ],
+  "checks-passed": {
+    "ran": [
+      {
+        "command": "python3 -m unittest test_hostcall_env.py",
+        "exit": 0,
+        "tail": [
+          "Ran 30 tests in 0.016s",
+          "OK"
+        ],
+        "at": "2026-10-30T07:40:57+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 -m unittest test_native_prompt.py",
+        "exit": 0,
+        "tail": [
+          "Ran 15 tests in 3.875s",
+          "OK"
+        ],
+        "at": "2026-10-30T07:41:00+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 test_hacheong.py",
+        "exit": 0,
+        "tail": [
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "done (dakdol, code) -> <tmp>",
+          "PASS test_worker_protects_tests_across_commits_ignored_nested_repos_and_non_git_targets",
+          "all passed"
+        ],
+        "at": "2026-10-30T07:41:03+00:00",
+        "chongdae": "chongdae 1.24.0"
+      }
+    ],
+    "at": "2026-10-30T07:41:04+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "review": {
+    "artifact-type": "dwitbuk/review@1",
+    "verdict": "accept",
+    "findings": [],
+    "worker": {
+      "host": "claude-code",
+      "model": "claude-opus-5-5",
+      "turns": 2,
+      "cost_usd": 0.0684112
+    },
+    "non-claims": [
+      "accepted without reading the tree: the eyes opened no file and ran no command — the verdict rests on the packet alone"
+    ]
+  },
+  "verdict-given": {
+    "at": "2026-10-30T07:41:10+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "reviewed_tree": {
+    ".claude-plugin/plugin.json": "d42cd643206c25d4b7887935b500309ec2b6254c",
+    ".codex-plugin/plugin.json": "9315e4c487fc1823410676b0920a707054f252ac",
+    ".gitignore": "2968d098301bcdb7ab346290f4da4c2299e4d628",
+    "README.md": "d4b47d8d1237d356ef761b92aeb25f82eacd5bfc",
+    "hostcall.py": "d7b8249dd926bda2f8d86bd2776fd35cbfeb07c5",
+    "plugin.json": "48a0a50ce74316749adfcb4a65e12cb3eb9e4710",
+    "skills/hire/SKILL.md": "8de83c0b8f3d3cad06ace6bb24be314dc1d6776e",
+    "AGENTS.md": "8ad8f18d142a7e5d34bfd82b9f9743892fcc1214",
+    "CLAUDE.md": "c140473a3a5fbe89301c99d9d0d1b76c5971f2c3"
+  },
+  "verified_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:dwitbuk}/eyes_worker.py",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "host": "claude-code",
+    "model": "claude-opus-5-5",
+    "turns": 2,
+    "cost_usd": 0.0684112,
+    "versions": {
+      "used": {
+        "dwitbuk": "1.16.0",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [],
+      "commands-run": 0,
+      "commands-failed": 0
+    }
+  },
+  "seen-non-claims": {
+    "by": "verifier of hostcall-env-build",
+    "texts": [
+      "(provider) No live model calls were tested.",
+      "(provider) Existing changes outside hostcall.py were left untouched; protected tests were not edited."
+    ],
+    "at": "2026-10-30T07:41:10+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "checks": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_hostcall_env.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ]
+  ],
+  "touched": [
+    "hostcall.py"
+  ],
+  "done": {
+    "at": "2026-10-30T07:41:11+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

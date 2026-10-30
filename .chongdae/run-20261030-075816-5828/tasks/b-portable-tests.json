@@ -1,0 +1,35 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "dropped",
+  "def": {
+    "id": "b-portable-tests",
+    "role": "session",
+    "brief": "Add the regression tests for amendment G9 to test_red_gate.py (a new TestCase class, methods named test_G9_...), changing nothing else in that file. Simulate the Windows constraint behaviourally: replace subprocess.Popen (unittest.mock.patch(\"subprocess.Popen\", ...)) with a subclass whose __init__ raises AssertionError(\"pass_fds not supported on Windows.\") when given a non-empty pass_fds and otherwise behaves as Popen, then call worker.unittest_red on real fixture files in a temporary directory. A call that raises must fail the test by an assertion (catch BaseException around the call and self.fail with what was raised), never by an error of the test itself. Also show that nothing is left inside the target but __pycache__. Import the candidate from this directory; no model, host or network calls; remove temporary directories. Run once: the new tests must fail now by assertions only (zero errors) and every earlier test in the file must still pass. Do not change test_hacheong.py or any other file.\n\nCONTRACT B, amendment G9 (found by the session's review of b-redgate-build, which hands REPORT back through os.pipe() and subprocess pass_fds). CPython refuses a non-empty pass_fds on Windows with `assert not pass_fds, \"pass_fds not supported on Windows.\"` — an AssertionError that unittest_red does not catch, so validate() and the worker would crash and write no answer there. G1-G8 stand unchanged.\n\nG9. unittest_red needs no file descriptor passed to the harness process and never raises: under a subprocess whose Popen refuses any non-empty pass_fds with AssertionError(\"pass_fds not supported on Windows.\") — as CPython does on Windows — it gives the same verdicts as on POSIX: \"red\" for a TestCase whose body calls self.fail, \"green\" for an all-passing TestCase, \"unverified\" for a file importing a missing module at the top, and \"unverified\" for a test that calls os._exit(0) (no report). Its channel still is not unittest's printed output and leaves nothing inside target (a scratch file, if any, lives outside target and is removed afterwards). On this POSIX machine every G1-G8 verdict stays as it is.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [
+      "test_red_gate.py"
+    ],
+    "gate": null,
+    "scope": [
+      "test_red_gate.py"
+    ]
+  },
+  "seq": 3,
+  "added": "2026-10-30T08:10:09+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so",
+    "dropped, not done: Added without --role nitpick: test_red_gate.py already exists, so add routed it to the session instead of the lock's nitpick. Nothing was done under it; re-added as b-portable-tests-nitpick with --role nitpick so the declared test writer does the work."
+  ],
+  "dropped": {
+    "why": "Added without --role nitpick: test_red_gate.py already exists, so add routed it to the session instead of the lock's nitpick. Nothing was done under it; re-added as b-portable-tests-nitpick with --role nitpick so the declared test writer does the work.",
+    "by": {
+      "agent": "claude-code claude-opus-5-5"
+    },
+    "at": "2026-10-30T08:10:22+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "touched": []
+}

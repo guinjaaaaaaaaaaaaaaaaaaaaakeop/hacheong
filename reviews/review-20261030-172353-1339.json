@@ -1,0 +1,142 @@
+{
+  "artifact-type": "dwitbuk/review@1",
+  "id": "review-20261030-172353-1339",
+  "since": "af50b921cffbcd6e66a33960aa85e60340bafe8e",
+  "head": "53609c45b08c806893ddd72a7b083d51813da44e",
+  "findings": [
+    {
+      "kind": "session-judged",
+      "where": "run-20261030-082056-56af/d-adopt-prior",
+      "text": "adopt .claude-plugin/plugin.json, .codex-plugin/plugin.json, AGENTS.md, CLAUDE.md, README.md, plugin.json, skills/hire/SKILL.md decided by the session (claude-code claude-opus-5-5), not a person: Owner-authorized earlier work written before this run existed (the pre-selfhosting baseline). The session verified the tree is byte-identical to the baseline (patch sha256 2b854c1f…, every pre/post blob, AGENTS.md and CLAUDE.md sha256) and checked its facts; authored before these runs, not by this session or the run's implementer. Adopted by the session on the owner's explicit authorization; non-author review by the outer root is pending.",
+      "layer": "observation"
+    },
+    {
+      "kind": "drift",
+      "where": "8 situation(s) were judged about other text of their members (executing a plan or a stated goal (building a slice); reviewing or disputing a change before merge; testing or trying a built slice; after a slice is built; asking what happened or what is open; asking about past decisions or what stands on a file before changing it; setting up a project's tooling for the first time; agent environment differs from or is missing the lock) — `hunsu judge request --out DIR --stale`, judge those packets, `consume`",
+      "text": "8 situation(s) were judged about other text of their members (executing a plan or a stated goal (building a slice); reviewing or disputing a change before merge; testing or trying a built slice; after a slice is built; asking what happened or what is open; asking about past decisions or what stands on a file before changing it; setting up a project's tooling for the first time; agent environment differs from or is missing the lock) — `hunsu judge request --out DIR --stale`, judge those packets, `consume`",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['executing a plan or a stated goal (building a slice)']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['reviewing or disputing a change before merge']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['testing or trying a built slice']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['asking what happened or what is open']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-075816-5828",
+      "text": "no check decides this task  [tasks: b-redgate-tests (run-20261030-075816-5828), b-portable-tests (run-20261030-075816-5828), b-portable-tests-nitpick (run-20261030-075816-5828); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436), hostcall-env-tests (run-20261030-073703-9853), a-record-tests (run-20261030-074733-8d14), d-adopt-prior (run-20261030-082056-56af), c-doc-repairs (run-20261030-082056-56af)]",
+      "layer": "objection",
+      "first-seen": "review-20261030-171828-620e"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-082056-56af",
+      "text": "no check decides this task  [tasks: d-adopt-prior (run-20261030-082056-56af), c-doc-repairs (run-20261030-082056-56af); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436), hostcall-env-tests (run-20261030-073703-9853), a-record-tests (run-20261030-074733-8d14), b-redgate-tests (run-20261030-075816-5828), b-portable-tests (run-20261030-075816-5828), b-portable-tests-nitpick (run-20261030-075816-5828)]",
+      "layer": "objection"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-075816-5828",
+      "text": "dropped, not done: Added without --role nitpick: test_red_gate.py already exists, so add routed it to the session instead of the lock's nitpick. Nothing was done under it  [task b-portable-tests]",
+      "layer": "objection",
+      "first-seen": "review-20261030-171828-620e"
+    },
+    {
+      "kind": "unchanged",
+      "layer": "observation",
+      "where": "4 earlier review(s)",
+      "seen-in": [
+        "review-20261030-163308-65fd",
+        "review-20261030-164303-c438",
+        "review-20261030-165635-0864",
+        "review-20261030-171828-620e"
+      ],
+      "text": "9 observation(s) written in full in 4 earlier review(s) and unchanged since (non-claim 3, seen-non-claims 1, session-judged 2, unregistered 1, verifier-non-claim 2)"
+    },
+    {
+      "kind": "undisposed",
+      "layer": "objection",
+      "where": "AGENTS.md, CLAUDE.md, README.md, plugin.json",
+      "text": "4 file(s) changed since 53cd7b3a2f65d927cd5360d05924e0f66238ad38; no completed run recorded touching them",
+      "carries": [
+        "outside-run",
+        "AGENTS.md, CLAUDE.md, README.md, plugin.json",
+        "changed ; no completed run recorded touching them"
+      ],
+      "first-seen": "review-20261030-163308-65fd",
+      "raised-in": "review-20261030-171828-620e/8"
+    },
+    {
+      "kind": "undisposed",
+      "layer": "objection",
+      "where": ".claude-plugin/plugin.json",
+      "text": "1 file(s) changed since 53cd7b3a2f65d927cd5360d05924e0f66238ad38; no completed run recorded touching them",
+      "carries": [
+        "outside-run",
+        ".claude-plugin/plugin.json",
+        "changed ; no completed run recorded touching them"
+      ],
+      "first-seen": "review-20261030-163308-65fd",
+      "raised-in": "review-20261030-171828-620e/9"
+    },
+    {
+      "kind": "undisposed",
+      "layer": "objection",
+      "where": ".codex-plugin/plugin.json",
+      "text": "1 file(s) changed since 53cd7b3a2f65d927cd5360d05924e0f66238ad38; no completed run recorded touching them",
+      "carries": [
+        "outside-run",
+        ".codex-plugin/plugin.json",
+        "changed ; no completed run recorded touching them"
+      ],
+      "first-seen": "review-20261030-163308-65fd",
+      "raised-in": "review-20261030-171828-620e/10"
+    },
+    {
+      "kind": "undisposed",
+      "layer": "objection",
+      "where": "skills/hire/SKILL.md",
+      "text": "1 file(s) changed since 53cd7b3a2f65d927cd5360d05924e0f66238ad38; no completed run recorded touching them",
+      "carries": [
+        "outside-run",
+        "skills/hire/SKILL.md",
+        "changed ; no completed run recorded touching them"
+      ],
+      "first-seen": "review-20261030-163308-65fd",
+      "raised-in": "review-20261030-171828-620e/11"
+    }
+  ]
+}

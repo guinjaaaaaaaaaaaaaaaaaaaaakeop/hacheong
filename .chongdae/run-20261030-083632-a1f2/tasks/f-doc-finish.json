@@ -1,0 +1,51 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "f-doc-finish",
+    "role": "session",
+    "brief": "Owner-authorized documentation finishing, README.md only: Versioning says a major version also covers dropping a supported Python or host version (the manifests' python >=3.11 floor, dropping 3.9 and 3.10, belongs to the planned v2; no version is bumped here). The child-identity paragraph states the exact scope — the six attribution fields removed, AGENT_HOST/AGENT_WORKER set, everything else kept on purpose, CODEX_SESSION_ID/CODEX_TOOL_CALL_ID/CODEX_CI not part of it, no promise to remove every identity-looking variable — and the evidence: the mocked self-check plus the outer root's real-CLI run of the candidate adapter (sha256 fa06077c…, verification.json: six parent markers gone, child AGENT_HOST/AGENT_WORKER, the CLIs' own ids, fixture unchanged), which is not installed-plugin, project-hook, release or adoption evidence. The red-gate wording says the assertions are AssertionError-based and that a widened failureException does not make red; the record rule says a directory entry covers the directory's own path. hostcall.py stays frozen at fa06077c00e1aa8514be54689567bad7abcb5c5f21794e1b5f551ebb1e07873b. Provenance kept in this record: the outer root read the saved pre-selfhosting hacheong.patch and AGENTS/CLAUDE and, as the non-author reader, approved adoption commit 7f0bf1b; its statements were correct for the pre-fix behaviour, the baseline stays untouched, and later commits update the docs for changed behaviour. The monitoring agent independently reviewed the runtime diffs and passed the native (15), identity (30) and main (22) tests at their checkpoints; it authored some earlier docs, so the non-author baseline review is the root's. The declared verifier's no-read accepts (hostcall-env-build, b-redgate-build) remain limitations; the outer review is separate and not retroactive proof that the verifier read the source.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      "README.md"
+    ]
+  },
+  "seq": 1,
+  "added": "2026-10-30T08:36:48+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so"
+  ],
+  "checks": [],
+  "touched": [
+    "README.md"
+  ],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "edit ./README.md"
+      ],
+      "commands-run": 4,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T08:36:48+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T08:38:48+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

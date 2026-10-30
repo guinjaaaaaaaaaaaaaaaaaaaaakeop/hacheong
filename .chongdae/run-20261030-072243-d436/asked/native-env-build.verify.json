@@ -1,0 +1,101 @@
+{
+  "artifact-type": "chongdae/request@1",
+  "written_by": "chongdae 1.24.0",
+  "stage": "verify",
+  "run": "run-20261030-072243-d436",
+  "task": "native-env-build",
+  "role": "verifier",
+  "target": ".",
+  "goal": "Native prompt-only dispatch describes a neutral parent-host environment instead of claiming Claude or Codex subprocess capabilities",
+  "brief": "Change worker.py, and only worker.py, so that every sentence N1-N7 below holds. test_native_prompt.py (written to this contract by the tests writer, committed) and test_hacheong.py are the protected tests: do not change either. The contract fixes the native section's text exactly, that --host has no effect on --prompt-only output, and that the claude/codex subprocess path is unchanged, so no behaviour choice should be left to you; internal shape is yours (for example how assemble is told to render the native section), provided environment_text(member, host) and assemble(member, request, domain, target=None, host=None) keep rendering exactly as N6 says for host \"claude\", \"codex\" and None, and the claude/codex adapters keep their (prompt, member, args, target) -> (answer, stream) form. The module docstring's --prompt-only usage line and any comment you touch must stay true of the new behaviour; follow the file's existing comment style. Do not touch hostcall.py, hacheong.py, README.md, skills/, members/, domains/ or any manifest; add no CLI option, host or model override, and change no sandbox.\n\nCONTRACT (sentences N1-N7). Defect: worker.py assembles the --prompt-only prompt with the Claude subprocess environment regardless of --host, so a native subagent (a session's own subagent, e.g. a Codex spawn_agent) is told Claude tools, \"Network: yes\" and loopback that nothing established. Switching it to the codex rendering would be just as false (a Codex subprocess sandbox does not apply to a native subagent). --prompt-only gets one neutral native environment section instead; the normal subprocess path is unchanged. No new CLI option, no host or model override, no sandbox change.\n\nNATIVE (the exact `# Where you run` section a --prompt-only prompt carries, heading line, blank line, then exactly these two lines):\n# Where you run\n\nYou are a subagent the parent session dispatched itself (a native call); this prompt was printed by `worker.py --prompt-only`, which grants nothing. What you may read, write and run, your tools, and whether you have the network or loopback (binding a local port) come from the parent host and its configuration, not from this text. This runner starts no subprocess for you — none of its sandboxes applies — and runs none of its validators on your answer.\nS\n\nwhere S is this existing sentence, verbatim (it is already the last line of every current rendering):\nWhat the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not yours to work around: stop with `status: blocked` and name it. When it is the network or loopback, list it in `lacked` (`[\"loopback\"]`, `[\"network\"]`), not only in prose — the runner reads `lacked`, not your sentences; nothing lacked: `lacked: []`. Do not write by hand what a tool generates (a lock file, a build output) and do not swap in another tool for the one the request names.\n\nN1. `python3 worker.py --member M --request F --response R --prompt-only` with `--host claude`, with `--host codex`, and with no `--host` exits 0, writes no response file, starts no host session, and prints a prompt whose `# Where you run` section (from that heading up to `# Request`) is exactly NATIVE — for every shipped member (dakdol, sibi, teujip, chojja).\nN2. For the same member, request and domain, the whole --prompt-only stdout is byte-identical for `--host claude`, `--host codex` and no `--host` — also when AGENT_CODEX_SANDBOX is set in the environment (e.g. `danger-full-access`) and when a project-local member's policy.json sets `can` (e.g. {\"network\": true, \"loopback\": true}) or a different `sandbox`.\nN3. A --prompt-only `# Where you run` section never promises an environment: it contains none of \"A Claude Code session with these tools only\", \"Network: yes\", \"Network: no\", \"Loopback — binding a local port\", \"A Codex sandbox\", \"`read-only`\", \"`workspace-write`\", \"no network\", nor the member's policy `tools` string (e.g. \"Read,Grep,Glob\").\nN4. Genuine unmet-capability reporting is kept in --prompt-only: its section ends with S verbatim, and the `# Answer` schema still lists `lacked` in `properties` (items enum [\"network\", \"loopback\"]) and in `required`. (Preservation: may pass before the build.)\nN5. The --prompt-only prompt keeps the contracts: sections in order `# Who you are` < `# The domain: <domain>` < `# Where you run` < `# Request` < `# Answer`; the JSON object printed in `# Request` (after the line \"Work only inside `target`. Do not write the response file; answer with the JSON object.\") parses equal to the request file's object, including non-ASCII text and a `needs` field; the JSON after \"matching this schema:\\n\" in `# Answer` parses equal to `worker.load_member(M)[\"schema\"]`. A request with `\"needs\": [\"loopback\"]` under `--host codex --prompt-only` is still printed (exit 0, no response file): the native host, not this renderer, decides. (Preservation: may pass before the build.)\nN6. The subprocess renderings are unchanged. With AGENT_CODEX_SANDBOX unset, `worker.environment_text(member, host)` for host \"claude\" and \"codex\", and so the `# Where you run` part of `worker.assemble(member, request, domain, target, host)`, is exactly as before: \"# Where you run\\n\\n\" + L1 + \"\\n\" + L2 + \"\\n\" + S, where for host \"claude\" L1 = \"A Claude Code session with these tools only: \" + <policy tools, default Read,Grep,Glob> + \".\" and L2 = \"Network: yes. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): yes.\"; for host \"codex\" with sandbox `workspace-write` (dakdol, teujip, chojja) L1 = \"A Codex sandbox (`workspace-write`): you can write inside `target`. By default it has no network — package installs and downloads fail — and `.git` is read-only: no commit, no `git mv`, no branch.\" and with sandbox `read-only` (sibi) L1 = \"A Codex sandbox (`read-only`): you can read and run commands, not write, and there is no network.\", and for codex L2 = \"Network: no. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): no.\". Shipped tools: dakdol and teujip \"Read,Edit,Write,Glob,Grep,Bash\", sibi \"Read,Grep,Glob\", chojja \"Bash,Read\". `worker.assemble(member, request, domain)` with no host still renders the claude form. (Preservation: may pass before the build.)\nN7. Without --prompt-only, `worker.main()` hands the host adapter — `worker.claude` for `--host claude`, `worker.codex` for `--host codex`, each called as `(prompt, member, args, target)` and returning `(answer, stream)` — a prompt whose `# Where you run` section is that host's N6 rendering, never NATIVE. A test may replace `worker.claude` / `worker.codex` in-process with a stub that records the prompt and returns a canned answer; no model is called. (Preservation: may pass before the build.)\n\nOut of scope: hostcall.py, hacheong.py, README.md, skills/, members/, domains/ and every manifest stay as they are; test_hacheong.py stays as it is and must keep passing (`python3 test_hacheong.py`).",
+  "closes": [],
+  "contract": {},
+  "checks": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ]
+  ],
+  "tests": [
+    "test_native_prompt.py",
+    "test_hacheong.py"
+  ],
+  "response": "./.chongdae/run-20261030-072243-d436/local/native-env-build.verify.response.json",
+  "touched": [
+    "worker.py"
+  ],
+  "built": {
+    "summary": "Changed only worker.py so --prompt-only prints the exact neutral native environment, independent of --host. Subprocess rendering remains unchanged. Both required checks passed.",
+    "verified": [
+      {
+        "check": "python3 -m unittest test_native_prompt.py",
+        "exit": 0
+      },
+      {
+        "check": "python3 test_hacheong.py",
+        "exit": 0
+      }
+    ],
+    "non-claims": [
+      "No live model sessions were invoked; subprocess dispatch was verified by the tests.",
+      "Existing changes outside worker.py were left untouched."
+    ]
+  },
+  "excluded": {
+    "record-paths": []
+  },
+  "attribution": {
+    "held-at-start": [
+      "README.md"
+    ]
+  },
+  "touched_since": [],
+  "since": {
+    ".": "6ad55d1caa3d08c6546b300a477f6e275a845507"
+  },
+  "tests_non_claims": {
+    "native-env-tests": [
+      "N1 'starts no host session' is checked with fake `claude` and `codex` programs placed first on PATH. A session started by an absolute path or an in-process API call would not be seen.",
+      "N2's AGENT_CODEX_SANDBOX test also requires the output with the variable set to equal the output with it unset. That is a little stronger than the sentence's comparison across hosts, but it follows from NATIVE being fixed.",
+      "N2 and N3 project-local policies use a copy of a shipped member's ROLE.md and answer.json with only policy.json changed. Other local ROLE or domain contents are not exercised.",
+      "N7 is checked for sibi and dakdol, covering both codex sandbox forms, not for all four members. It relies on validate and mark_lacked accepting a canned answer with an empty stream.",
+      "N4–N7 are preservation tests and pass both before and after the build. They decide only that the build did not regress these behaviours."
+    ]
+  },
+  "checked": [
+    {
+      "command": "python3 -m unittest test_native_prompt.py",
+      "exit": 0,
+      "tail": [
+        "Ran 15 tests in 3.943s",
+        "OK"
+      ],
+      "at": "2026-10-30T07:30:44+00:00",
+      "chongdae": "chongdae 1.24.0",
+      "source": "the task's checks, run by chongdae to decide it",
+      "changed_since": []
+    },
+    {
+      "command": "python3 test_hacheong.py",
+      "exit": 0,
+      "tail": [
+        "failed (dakdol, code) -> <tmp>",
+        "failed (dakdol, code) -> <tmp>",
+        "failed (dakdol, code) -> <tmp>",
+        "done (dakdol, code) -> <tmp>",
+        "PASS test_worker_protects_tests_across_commits_ignored_nested_repos_and_non_git_targets",
+        "all passed"
+      ],
+      "at": "2026-10-30T07:30:47+00:00",
+      "chongdae": "chongdae 1.24.0",
+      "source": "the task's checks, run by chongdae to decide it",
+      "changed_since": []
+    }
+  ]
+}

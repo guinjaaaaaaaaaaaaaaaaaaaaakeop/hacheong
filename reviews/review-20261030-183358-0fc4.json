@@ -1,0 +1,108 @@
+{
+  "artifact-type": "dwitbuk/review@1",
+  "id": "review-20261030-183358-0fc4",
+  "since": "4f074ac38522a47928517224a19a69e177c74b47",
+  "head": "242a9cad4f1f447d7de038bb46e5486372dfb8f9",
+  "findings": [
+    {
+      "kind": "self-performed",
+      "where": "run-20261030-093000-f0a1/rc-metadata",
+      "text": "the session did this itself instead of the lock's implementer (decided by the session (claude-code claude-opus-5-5)): Owner-authorized, session-owned release-candidate metadata and README wording (version values and the major-version rule); not a runtime change, so no implementer is hired",
+      "layer": "observation"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['executing a plan or a stated goal (building a slice)']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['reviewing or disputing a change before merge']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['testing or trying a built slice']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['asking what happened or what is open']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-075816-5828",
+      "text": "no check decides this task  [tasks: b-redgate-tests (run-20261030-075816-5828), b-portable-tests (run-20261030-075816-5828), b-portable-tests-nitpick (run-20261030-075816-5828); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436), hostcall-env-tests (run-20261030-073703-9853), a-record-tests (run-20261030-074733-8d14), d-adopt-prior (run-20261030-082056-56af), c-doc-repairs (run-20261030-082056-56af), e-review-tests (run-20261030-082804-dd81), f-doc-finish (run-20261030-083632-a1f2), g-env-refresh (run-20261030-084301-c75e), g-bootstrap-ignores (run-20261030-084301-c75e), h-review-debt (run-20261030-085237-053c)]",
+      "layer": "objection",
+      "first-seen": "review-20261030-171828-620e"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-082056-56af",
+      "text": "no check decides this task  [tasks: d-adopt-prior (run-20261030-082056-56af), c-doc-repairs (run-20261030-082056-56af); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436), hostcall-env-tests (run-20261030-073703-9853), a-record-tests (run-20261030-074733-8d14), b-redgate-tests (run-20261030-075816-5828), b-portable-tests (run-20261030-075816-5828), b-portable-tests-nitpick (run-20261030-075816-5828), e-review-tests (run-20261030-082804-dd81), f-doc-finish (run-20261030-083632-a1f2), g-env-refresh (run-20261030-084301-c75e), g-bootstrap-ignores (run-20261030-084301-c75e), h-review-debt (run-20261030-085237-053c)]",
+      "layer": "objection",
+      "first-seen": "review-20261030-172353-1339"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-084301-c75e",
+      "text": "no check decides this task  [tasks: g-env-refresh (run-20261030-084301-c75e), g-bootstrap-ignores (run-20261030-084301-c75e); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436), hostcall-env-tests (run-20261030-073703-9853), a-record-tests (run-20261030-074733-8d14), b-redgate-tests (run-20261030-075816-5828), b-portable-tests (run-20261030-075816-5828), b-portable-tests-nitpick (run-20261030-075816-5828), d-adopt-prior (run-20261030-082056-56af), c-doc-repairs (run-20261030-082056-56af), e-review-tests (run-20261030-082804-dd81), f-doc-finish (run-20261030-083632-a1f2), h-review-debt (run-20261030-085237-053c)]",
+      "layer": "objection",
+      "first-seen": "review-20261030-174719-9d0b"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-075816-5828",
+      "text": "dropped, not done: Added without --role nitpick: test_red_gate.py already exists, so add routed it to the session instead of the lock's nitpick. Nothing was done under it  [task b-portable-tests]",
+      "layer": "objection",
+      "first-seen": "review-20261030-171828-620e"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-084301-c75e",
+      "text": "g-bootstrap-ignores: done on the session's word by name (`run g-bootstrap-ignores`), with nothing of its own in the tree and no `did`  [task g-bootstrap-ignores]",
+      "layer": "objection",
+      "first-seen": "review-20261030-174719-9d0b"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-085237-053c",
+      "text": "h-review-debt: done on the session's word by name (`run h-review-debt`), with nothing of its own in the tree and no `did`  [task h-review-debt]",
+      "layer": "objection",
+      "first-seen": "review-20261030-175301-1dd9"
+    },
+    {
+      "kind": "unchanged",
+      "layer": "observation",
+      "where": "8 earlier review(s)",
+      "seen-in": [
+        "review-20261030-163308-65fd",
+        "review-20261030-164303-c438",
+        "review-20261030-165635-0864",
+        "review-20261030-171828-620e",
+        "review-20261030-172353-1339",
+        "review-20261030-173548-74fc",
+        "review-20261030-173849-510f",
+        "review-20261030-175301-1dd9"
+      ],
+      "text": "13 observation(s) written in full in 8 earlier review(s) and unchanged since (non-claim 6, seen-non-claims 1, session-judged 3, unregistered 1, verifier-non-claim 2)"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "artifact-type": "chongdae/plan@1",
+  "written_by": "chongdae 1.24.0",
+  "goal": "Adopt the owner-authorized earlier documentation, skill, runtime-floor and maintainer-guidance edits as verified against their baseline, then bring the documentation in line with the repaired behaviour",
+  "kind": "session",
+  "tasks": [],
+  "providers": {
+    "session": "session"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "h-review-debt",
+    "role": "session",
+    "brief": "Owner-authorized environment maintenance, session-owned: released hunsu 1.15.1 judge consume, on a still-fits verdict, replaces an existing explicit reviewed:false resolution with a delegated-judge object, silently removing unread-review debt (root's inspection; hunsu's own source session fixes it for its next release). Restore reviewed:false for each of the four resolutions that were false before the refresh (captured outside this project) wherever consume changed it, keeping order/accept/note and everything else; no judge request, no model call, no change to the raw judge answers or to hunsu-judgments.json; then the supported lock and check. Finding at start: the only resolution consume changed ('testing or trying a built slice') was already restored to false in g-env-refresh before its commit, so hunsu.json and hunsu.lock.json already hold all four as false and match their committed text; this task verifies that, re-runs lock/check, and records the limitation. The four stay unread: nobody is recorded as having read them.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      "hunsu.json",
+      "hunsu.lock.json"
+    ]
+  },
+  "seq": 1,
+  "added": "2026-10-30T08:52:48+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so",
+    "h-review-debt: done on the session's word by name (`run h-review-debt`), with nothing of its own in the tree and no `did`"
+  ],
+  "checks": [],
+  "touched": [],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [],
+      "commands-run": 1,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T08:52:48+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T08:53:00+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

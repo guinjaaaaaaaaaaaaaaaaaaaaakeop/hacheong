@@ -1,0 +1,10 @@
+{
+  "artifact-type": "chongdae/plan@1",
+  "written_by": "chongdae 1.24.0",
+  "goal": "Refresh the project's hunsu environment snapshot through the released judge workflow after the maintainer instructions changed, and adopt the bootstrap's local ignore entries",
+  "kind": "session",
+  "tasks": [],
+  "providers": {
+    "session": "session"
+  }
+}

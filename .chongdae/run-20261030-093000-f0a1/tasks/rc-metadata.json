@@ -1,0 +1,228 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "rc-metadata",
+    "role": "session",
+    "brief": "Prepare hacheong 2.0.0 as a release candidate: set exactly five version values to 2.0.0 (plugin.json version, .claude-plugin/plugin.json version, .codex-plugin/plugin.json version, .claude-plugin/marketplace.json metadata.version and its hacheong plugins[].version); keep all three engines.python at >=3.11; keep .agents/plugins/marketplace.json as it is (no version field there); turn README Versioning's pending 'planned 2.0' sentence into a timeless major-version rule, keeping the note that releases up to 1.12.1 had the old red gate. No runtime, test, AGENTS, skill or hostcall.py change; nothing published, tagged, installed or pushed. The self-checks run on Python 3.11.",
+    "closes": [],
+    "needs": [],
+    "checks": [
+      [
+        "python3",
+        "-c",
+        "import json\nM=(\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\")\nm=json.load(open(\".claude-plugin/marketplace.json\"))\nv=[json.load(open(f))[\"version\"] for f in M]+[m[\"metadata\"][\"version\"]]+[p[\"version\"] for p in m[\"plugins\"] if p[\"name\"]==\"hacheong\"]\ne=[json.load(open(f))[\"engines\"][\"python\"] for f in M]\nt=open(\".agents/plugins/marketplace.json\").read(); a=json.loads(t)\nassert v==[\"2.0.0\"]*5, v\nassert e==[\">=3.11\"]*3, e\nassert a[\"name\"]==\"hacheong\" and [p[\"name\"] for p in a[\"plugins\"]]==[\"hacheong\"] and a[\"plugins\"][0][\"source\"]=={\"source\":\"local\",\"path\":\"./\"} and \"version\" not in t, a\nprint(\"versions\", v, \"python\", e, \"agents marketplace unchanged\")"
+      ],
+      [
+        "python3",
+        "-c",
+        "import json,os,re\nslug=lambda h: re.sub(r\"[^a-z0-9 -]\",\"\",h.strip().lower()).replace(\" \",\"-\")\nbad=[]\nfor md in (\"README.md\",\"AGENTS.md\",\"CLAUDE.md\",\"skills/hire/SKILL.md\"):\n    for t in re.findall(r\"\\]\\(([^)\\s]+)\\)\", open(md, encoding=\"utf-8\").read()):\n        if t.startswith((\"http://\",\"https://\")): continue\n        p,_,a=t.partition(\"#\"); f=os.path.normpath(os.path.join(os.path.dirname(md),p)) if p else md\n        if not os.path.exists(f): bad.append((md,t)); continue\n        if a and f.endswith(\".md\") and a not in {slug(h) for h in re.findall(r\"^#+ (.+)$\",open(f,encoding=\"utf-8\").read(),re.M)}: bad.append((md,t))\nfor f in (\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\"):\n    d=json.load(open(f))\n    for role,argv in d[\"roles\"].items():\n        bad += [(f,role,x) for x in argv if \"{plugin:hacheong}/\" in x and not os.path.exists(x.split(\"{plugin:hacheong}/\")[1])]\nc=json.load(open(\".codex-plugin/plugin.json\")); bad += [] if os.path.isdir(c[\"skills\"]) else [(\"codex skills\",c[\"skills\"])]\nbad += [] if os.path.isfile(\"skills/hire/SKILL.md\") else [(\"skill missing\",)]\nbad += [] if os.path.isdir(json.load(open(\".claude-plugin/marketplace.json\"))[\"plugins\"][0][\"source\"]) else [(\"marketplace source\",)]\nassert not bad, bad\nprint(\"links, anchors, role workers, skills and marketplace sources resolve\")"
+      ],
+      [
+        "python3",
+        "hacheong.py",
+        "check"
+      ],
+      [
+        "python3",
+        "test_hacheong.py"
+      ],
+      [
+        "python3",
+        "-m",
+        "unittest",
+        "test_native_prompt.py",
+        "test_hostcall_env.py",
+        "test_record_paths.py",
+        "test_red_gate.py"
+      ]
+    ],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      ".claude-plugin/marketplace.json",
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      "README.md",
+      "plugin.json"
+    ]
+  },
+  "seq": 1,
+  "added": "2026-10-30T09:30:58+00:00",
+  "self-performed": {
+    "instead-of": "implementer",
+    "why": "Owner-authorized, session-owned release-candidate metadata and README wording (version values and the major-version rule); not a runtime change, so no implementer is hired",
+    "by": {
+      "agent": "claude-code claude-opus-5-5"
+    },
+    "at": "2026-10-30T09:30:58+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "checks-passed": {
+    "ran": [
+      {
+        "command": "python3 -c 'import json\nM=(\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\")\nm=json.load(open(\".claude-plugin/marketplace.json\"))\nv=[json.load(open(f))[\"version\"] for f in M]+[m[\"metadata\"][\"version\"]]+[p[\"version\"] for p in m[\"plugins\"] if p[\"name\"]==\"hacheong\"]\ne=[json.load(open(f))[\"engines\"][\"python\"] for f in M]\nt=open(\".agents/plugins/marketplace.json\").read(); a=json.loads(t)\nassert v==[\"2.0.0\"]*5, v\nassert e==[\">=3.11\"]*3, e\nassert a[\"name\"]==\"hacheong\" and [p[\"name\"] for p in a[\"plugins\"]]==[\"hacheong\"] and a[\"plugins\"][0][\"source\"]=={\"source\":\"local\",\"path\":\"./\"} and \"version\" not in t, a\nprint(\"versions\", v, \"python\", e, \"agents marketplace unchanged\")'",
+        "exit": 0,
+        "tail": [
+          "versions ['2.0.0', '2.0.0', '2.0.0', '2.0.0', '2.0.0'] python ['>=3.11', '>=3.11', '>=3.11'] agents marketplace unchanged"
+        ],
+        "at": "2026-10-30T09:33:04+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 -c 'import json,os,re\nslug=lambda h: re.sub(r\"[^a-z0-9 -]\",\"\",h.strip().lower()).replace(\" \",\"-\")\nbad=[]\nfor md in (\"README.md\",\"AGENTS.md\",\"CLAUDE.md\",\"skills/hire/SKILL.md\"):\n    for t in re.findall(r\"\\]\\(([^)\\s]+)\\)\", open(md, encoding=\"utf-8\").read()):\n        if t.startswith((\"http://\",\"https://\")): continue\n        p,_,a=t.partition(\"#\"); f=os.path.normpath(os.path.join(os.path.dirname(md),p)) if p else md\n        if not os.path.exists(f): bad.append((md,t)); continue\n        if a and f.endswith(\".md\") and a not in {slug(h) for h in re.findall(r\"^#+ (.+)$\",open(f,encoding=\"utf-8\").read(),re.M)}: bad.append((md,t))\nfor f in (\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\"):\n    d=json.load(open(f))\n    for role,argv in d[\"roles\"].items():\n        bad += [(f,role,x) for x in argv if \"{plugin:hacheong}/\" in x and not os.path.exists(x.split(\"{plugin:hacheong}/\")[1])]\nc=json.load(open(\".codex-plugin/plugin.json\")); bad += [] if os.path.isdir(c[\"skills\"]) else [(\"codex skills\",c[\"skills\"])]\nbad += [] if os.path.isfile(\"skills/hire/SKILL.md\") else [(\"skill missing\",)]\nbad += [] if os.path.isdir(json.load(open(\".claude-plugin/marketplace.json\"))[\"plugins\"][0][\"source\"]) else [(\"marketplace source\",)]\nassert not bad, bad\nprint(\"links, anchors, role workers, skills and marketplace sources resolve\")'",
+        "exit": 0,
+        "tail": [
+          "links, anchors, role workers, skills and marketplace sources resolve"
+        ],
+        "at": "2026-10-30T09:33:04+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 hacheong.py check",
+        "exit": 0,
+        "tail": [
+          "hacheong check: 4 member(s), 0 error(s)"
+        ],
+        "at": "2026-10-30T09:33:04+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 test_hacheong.py",
+        "exit": 0,
+        "tail": [
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "failed (dakdol, code) -> <tmp>",
+          "done (dakdol, code) -> <tmp>",
+          "PASS test_worker_protects_tests_across_commits_ignored_nested_repos_and_non_git_targets",
+          "all passed"
+        ],
+        "at": "2026-10-30T09:33:07+00:00",
+        "chongdae": "chongdae 1.24.0"
+      },
+      {
+        "command": "python3 -m unittest test_native_prompt.py test_hostcall_env.py test_record_paths.py test_red_gate.py",
+        "exit": 0,
+        "tail": [
+          "ResourceWarning: Enable tracemalloc to get the object allocation traceback",
+          "./worker.py:377: ResourceWarning: unclosed file <_io.BufferedReader name='<tmp>'>",
+          "  state[path] = hashlib.sha1(open(full, \"rb\").read()).hexdigest() if os.path.isfile(full) else \"gone\"",
+          "ResourceWarning: Enable tracemalloc to get the object allocation traceback",
+          "Ran 183 tests in 25.259s",
+          "OK"
+        ],
+        "at": "2026-10-30T09:33:32+00:00",
+        "chongdae": "chongdae 1.24.0"
+      }
+    ],
+    "at": "2026-10-30T09:33:33+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "review": {
+    "artifact-type": "dwitbuk/review@1",
+    "verdict": "accept",
+    "findings": [],
+    "worker": {
+      "host": "claude-code",
+      "model": "claude-opus-5-5",
+      "turns": 3,
+      "cost_usd": 0.0741578
+    }
+  },
+  "verdict-given": {
+    "at": "2026-10-30T09:33:44+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "reviewed_tree": {},
+  "verified_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:dwitbuk}/eyes_worker.py",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "host": "claude-code",
+    "model": "claude-opus-5-5",
+    "turns": 3,
+    "cost_usd": 0.0741578,
+    "versions": {
+      "used": {
+        "dwitbuk": "1.16.0",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [],
+      "commands-run": 0,
+      "commands-failed": 0
+    }
+  },
+  "checks": [
+    [
+      "python3",
+      "-c",
+      "import json\nM=(\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\")\nm=json.load(open(\".claude-plugin/marketplace.json\"))\nv=[json.load(open(f))[\"version\"] for f in M]+[m[\"metadata\"][\"version\"]]+[p[\"version\"] for p in m[\"plugins\"] if p[\"name\"]==\"hacheong\"]\ne=[json.load(open(f))[\"engines\"][\"python\"] for f in M]\nt=open(\".agents/plugins/marketplace.json\").read(); a=json.loads(t)\nassert v==[\"2.0.0\"]*5, v\nassert e==[\">=3.11\"]*3, e\nassert a[\"name\"]==\"hacheong\" and [p[\"name\"] for p in a[\"plugins\"]]==[\"hacheong\"] and a[\"plugins\"][0][\"source\"]=={\"source\":\"local\",\"path\":\"./\"} and \"version\" not in t, a\nprint(\"versions\", v, \"python\", e, \"agents marketplace unchanged\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,os,re\nslug=lambda h: re.sub(r\"[^a-z0-9 -]\",\"\",h.strip().lower()).replace(\" \",\"-\")\nbad=[]\nfor md in (\"README.md\",\"AGENTS.md\",\"CLAUDE.md\",\"skills/hire/SKILL.md\"):\n    for t in re.findall(r\"\\]\\(([^)\\s]+)\\)\", open(md, encoding=\"utf-8\").read()):\n        if t.startswith((\"http://\",\"https://\")): continue\n        p,_,a=t.partition(\"#\"); f=os.path.normpath(os.path.join(os.path.dirname(md),p)) if p else md\n        if not os.path.exists(f): bad.append((md,t)); continue\n        if a and f.endswith(\".md\") and a not in {slug(h) for h in re.findall(r\"^#+ (.+)$\",open(f,encoding=\"utf-8\").read(),re.M)}: bad.append((md,t))\nfor f in (\"plugin.json\",\".claude-plugin/plugin.json\",\".codex-plugin/plugin.json\"):\n    d=json.load(open(f))\n    for role,argv in d[\"roles\"].items():\n        bad += [(f,role,x) for x in argv if \"{plugin:hacheong}/\" in x and not os.path.exists(x.split(\"{plugin:hacheong}/\")[1])]\nc=json.load(open(\".codex-plugin/plugin.json\")); bad += [] if os.path.isdir(c[\"skills\"]) else [(\"codex skills\",c[\"skills\"])]\nbad += [] if os.path.isfile(\"skills/hire/SKILL.md\") else [(\"skill missing\",)]\nbad += [] if os.path.isdir(json.load(open(\".claude-plugin/marketplace.json\"))[\"plugins\"][0][\"source\"]) else [(\"marketplace source\",)]\nassert not bad, bad\nprint(\"links, anchors, role workers, skills and marketplace sources resolve\")"
+    ],
+    [
+      "python3",
+      "hacheong.py",
+      "check"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py",
+      "test_hostcall_env.py",
+      "test_record_paths.py",
+      "test_red_gate.py"
+    ]
+  ],
+  "touched": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "README.md",
+    "plugin.json"
+  ],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "edit ./README.md"
+      ],
+      "commands-run": 6,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T09:30:58+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T09:33:44+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

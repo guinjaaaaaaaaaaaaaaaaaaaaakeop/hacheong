@@ -1,0 +1,107 @@
+{
+  "artifact-type": "dwitbuk/review@1",
+  "id": "review-20261030-164303-c438",
+  "since": "0ced68c9c1175b466cedbfddc26a2c9ec837054f",
+  "head": "7aa70c64a8dbdfced9b7c7009a8b9a49832cca3c",
+  "findings": [
+    {
+      "kind": "verifier-non-claim",
+      "where": "run-20261030-073703-9853",
+      "text": "hostcall-env-build: (verifier) accepted without reading the tree: the eyes opened no file and ran no command — the verdict rests on the packet alone",
+      "layer": "observation"
+    },
+    {
+      "kind": "seen-non-claims",
+      "where": "run-20261030-072243-d436/native-env-build (2), run-20261030-072243-d436/native-env-tests (5), run-20261030-073703-9853/hostcall-env-build (2), run-20261030-073703-9853/hostcall-env-tests (4)",
+      "text": "13 provider non-claim(s) went to the verifier with the work and it accepted — read there, said here, not charged; each stays in its task's `non-claims`",
+      "layer": "observation"
+    },
+    {
+      "kind": "unregistered",
+      "where": "members/",
+      "text": "1 directory of tracked code or config hold no registered file: members/ (8, changed 17 commits ago)",
+      "standing": true,
+      "reporter": "mangsang-check",
+      "layer": "observation"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['executing a plan or a stated goal (building a slice)']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['reviewing or disputing a change before merge']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['testing or trying a built slice']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['asking what happened or what is open']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "outside-run",
+      "where": "AGENTS.md, CLAUDE.md, README.md, plugin.json",
+      "text": "4 file(s) changed since 0ced68c9c1175b466cedbfddc26a2c9ec837054f; no completed run recorded touching them",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "outside-run",
+      "where": ".claude-plugin/plugin.json",
+      "text": "1 file(s) changed since 0ced68c9c1175b466cedbfddc26a2c9ec837054f; no completed run recorded touching them",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "outside-run",
+      "where": ".codex-plugin/plugin.json",
+      "text": "1 file(s) changed since 0ced68c9c1175b466cedbfddc26a2c9ec837054f; no completed run recorded touching them",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "outside-run",
+      "where": "skills/hire/SKILL.md",
+      "text": "1 file(s) changed since 0ced68c9c1175b466cedbfddc26a2c9ec837054f; no completed run recorded touching them",
+      "layer": "objection",
+      "first-seen": "review-20261030-163308-65fd"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-073703-9853",
+      "text": "no check decides this task  [tasks: hostcall-env-tests (run-20261030-073703-9853); also in other runs: env-local-records (run-20261030-072243-d436), native-env-tests (run-20261030-072243-d436)]",
+      "layer": "observation"
+    },
+    {
+      "kind": "unchanged",
+      "layer": "observation",
+      "where": "1 earlier review(s)",
+      "seen-in": [
+        "review-20261030-163308-65fd"
+      ],
+      "text": "2 observation(s) written in full in 1 earlier review(s) and unchanged since (non-claim 1, session-judged 1)"
+    }
+  ]
+}

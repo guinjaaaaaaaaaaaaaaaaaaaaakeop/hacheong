@@ -1,0 +1,48 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "g-bootstrap-ignores",
+    "role": "session",
+    "brief": "Adopt the three .gitignore lines that hunsu init added in the bootstrap session 4f87e193-ff21-41b0-960e-2da28167873d (owner-authorized; the pre-selfhosting baseline predates the bootstraps, so their absence there is not a lack of authorization): .claude/settings.local.json, hunsu-conflicts.md, *-response.transcript.jsonl. Verify the intended ignore behaviour, commit .gitignore alone, attribute it to the bootstrap, not to the runtime fixes.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [],
+    "gate": null,
+    "scope": [
+      ".gitignore"
+    ]
+  },
+  "seq": 2,
+  "added": "2026-10-30T08:43:01+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so",
+    "g-bootstrap-ignores: done on the session's word by name (`run g-bootstrap-ignores`), with nothing of its own in the tree and no `did`"
+  ],
+  "checks": [],
+  "touched": [],
+  "performed_by": {
+    "provider": "session",
+    "host": "claude-code",
+    "agent": "claude-code_2-1-314_agent",
+    "effort": "xhigh",
+    "model": "claude-opus-5-5",
+    "versions": {
+      "used": {
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [],
+      "commands-run": 6,
+      "command-lines": "kept in the local session transcript, not in the record",
+      "window-from": "2026-10-30T08:43:01+00:00"
+    }
+  },
+  "done": {
+    "at": "2026-10-30T08:44:12+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

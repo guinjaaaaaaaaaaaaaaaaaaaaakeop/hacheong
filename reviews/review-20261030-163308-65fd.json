@@ -1,0 +1,90 @@
+{
+  "artifact-type": "dwitbuk/review@1",
+  "id": "review-20261030-163308-65fd",
+  "since": "30072ee",
+  "head": "0ced68c9c1175b466cedbfddc26a2c9ec837054f",
+  "findings": [
+    {
+      "kind": "session-judged",
+      "where": "run-20261030-072243-d436/env-local-records",
+      "text": "adopt .claude/settings.json, hunsu-judgments.json, hunsu.json, hunsu.lock.json decided by the session (claude-code claude-opus-5-5), not a person: The project's hunsu environment (declaration, lock, judge's judgments, enabled plugins) was written by the earlier bootstrap session before this run existed and is untracked; the owner's task brief names environment adoption among what this run may commit. Adopted by the session; the hunsu resolutions inside stay reviewed:false, as written.",
+      "layer": "observation"
+    },
+    {
+      "kind": "seen-non-claims",
+      "where": "run-20261030-072243-d436/native-env-build (2), run-20261030-072243-d436/native-env-tests (5)",
+      "text": "7 provider non-claim(s) went to the verifier with the work and it accepted — read there, said here, not charged; each stays in its task's `non-claims`",
+      "layer": "observation"
+    },
+    {
+      "kind": "unregistered",
+      "where": "members/",
+      "text": "1 directory of tracked code or config hold no registered file: members/ (8, changed 15 commits ago)",
+      "standing": true,
+      "reporter": "mangsang-check",
+      "layer": "observation"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['executing a plan or a stated goal (building a slice)']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['reviewing or disputing a change before merge']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['testing or trying a built slice']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection"
+    },
+    {
+      "kind": "unreviewed",
+      "where": "hunsu.json resolutions['asking what happened or what is open']",
+      "text": "applied from the judge's proposal, marked reviewed: false — `hunsu policy` shows the conflict a person judges",
+      "standing": true,
+      "reporter": "hunsu",
+      "layer": "objection"
+    },
+    {
+      "kind": "outside-run",
+      "where": "AGENTS.md, CLAUDE.md, README.md, plugin.json",
+      "text": "4 file(s) changed since 30072ee; no completed run recorded touching them",
+      "layer": "objection"
+    },
+    {
+      "kind": "outside-run",
+      "where": ".claude-plugin/plugin.json",
+      "text": "1 file(s) changed since 30072ee; no completed run recorded touching them",
+      "layer": "objection"
+    },
+    {
+      "kind": "outside-run",
+      "where": ".codex-plugin/plugin.json",
+      "text": "1 file(s) changed since 30072ee; no completed run recorded touching them",
+      "layer": "objection"
+    },
+    {
+      "kind": "outside-run",
+      "where": "skills/hire/SKILL.md",
+      "text": "1 file(s) changed since 30072ee; no completed run recorded touching them",
+      "layer": "objection"
+    },
+    {
+      "kind": "non-claim",
+      "where": "run-20261030-072243-d436",
+      "text": "no check decides this task  [tasks env-local-records, native-env-tests]",
+      "layer": "observation"
+    }
+  ]
+}

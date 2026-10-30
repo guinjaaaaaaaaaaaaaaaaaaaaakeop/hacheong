@@ -1,0 +1,44 @@
+{
+  "artifact-type": "chongdae/request@1",
+  "written_by": "chongdae 1.24.0",
+  "stage": "build",
+  "run": "run-20261030-074733-8d14",
+  "task": "a-record-build",
+  "role": "implementer",
+  "target": ".",
+  "goal": "The runner's record exclusion matches declared record files exactly and record directories at a path boundary, so source files that share a record's prefix stay visible",
+  "brief": "Change worker.py, and only worker.py, so that every sentence R1-R7 below holds: record_paths() stops adding the bare \"hunsu\" and adds the five ENV files instead, and one record-matching rule (exact file; directory at a path boundary; anchored at the project root) is used by tree_state() and by inventory() for HEAD and for the working tree — matching each file's true path relative to the project root, so a record inside a dot-directory matches. Keep inventory's traversal and its existing non-record skips; no traversal redesign; no import of any other plugin. test_record_paths.py and test_hacheong.py (written and amended to this contract by the tests writer, committed), test_native_prompt.py and test_hostcall_env.py are the protected tests: do not change any of them. The contract fixes record_paths()'s exact tuples, the matching rule and the root anchoring, so no behaviour choice should be left to you; keep docstrings and comments true of the new rule in the file's existing style. Do not touch hostcall.py, hacheong.py, README.md, skills/, members/, domains/ or any manifest.\n\nCONTRACT A (sentences R1-R7). Defect: worker.record_paths() always adds a bare \"hunsu\" and tree_state() leaves out every path that startswith() any record entry, so source files hunsu.py, hunsu_helper.py and hunsu-notes.md are hidden as if they were environment records, and a declared record file hides its prefix neighbours (e.g. declared \"hunsu.json\" hides \"hunsu.json.bak\"). The refactor inventory, meanwhile, skips record directories wherever they appear in the tree and never skips an exact record file. Fix: one exact-file versus directory-boundary rule, applied by every consumer of record_paths(). No traversal redesign, no import of any sibling plugin's module.\n\nENV = the five hunsu environment files, exactly: hunsu.json, hunsu.lock.json, hunsu-judgments.json, hunsu-conflicts.md, hunsu.local.json.\n\nR1. record_paths(target) returns a sorted tuple of unique strings: \".chongdae/\" and the five ENV files always; plus every path the lock's `record-paths` mapping declares (the union of its values) — or, when hunsu.lock.json has no `record-paths` mapping (no lock, unreadable JSON, or `record-paths` not a dict), the fallback \".mangsang/\", \".dwitbuk/\", \"reviews/\". It never contains a bare \"hunsu\" or any other entry. Exactly: with no lock -> (\".chongdae/\", \".dwitbuk/\", \".mangsang/\", \"hunsu-conflicts.md\", \"hunsu-judgments.json\", \"hunsu.json\", \"hunsu.local.json\", \"hunsu.lock.json\", \"reviews/\"); with a lock {\"record-paths\": {\"alpha\": [\".alpha/\"], \"beta\": []}} -> (\".alpha/\", \".chongdae/\", \"hunsu-conflicts.md\", \"hunsu-judgments.json\", \"hunsu.json\", \"hunsu.local.json\", \"hunsu.lock.json\").\nR2. The rule. Paths are relative to the project root, with \"/\" separators, and record entries are anchored at that root. An entry ending in \"/\" is a directory record: it covers every path under it, at any depth (declared \"reviews/\" covers \"reviews/a.json\" and \"reviews/x/y.json\"), and never a sibling that merely shares its prefix (\"reviews-old/a.json\", \"reviewsx/a.py\", \"reviews.md\") nor a same-named directory deeper in the tree (\"docs/reviews/a.json\", \"app/reviews/models.py\"); a nested declared directory follows the same boundary (declared \"docs/rec/\" covers \"docs/rec/x.json\", not \"docs/record/x.json\" nor \"docs/rec.md\"). An entry without a trailing \"/\" is a file record: it covers exactly that one path — never a prefix neighbour (\"hunsu.json.bak\", \"hunsu.jsonx\", \"notes.rec.bak\", \"notes.recx\" next to declared \"notes.rec\") nor the same name deeper in the tree (\"sub/hunsu.json\").\nR3. tree_state(target) leaves out exactly the paths R2 says are records (besides what it already leaves out: __pycache__ paths, .pyc and .DS_Store). So hunsu.py, hunsu_helper.py, hunsu-notes.md, prefix neighbours of declared files and directories, and same-named paths deeper in the tree appear in its state when created or changed, while the five ENV files, anything under \".chongdae/\" and every declared record stay out.\nR4. inventory(target, at_head) leaves out the same records by the same rule, for at_head=True (git HEAD) and at_head=False (the working tree) alike — directory records and exact file records both: a declared exact Python record file (e.g. \"gen_record.py\", or \".tool/gen_record.py\" inside a dot-directory) is counted in neither, while its neighbour \"gen_record_tool.py\", hunsu.py, hunsu_helper.py and \"app/reviews/models.py\" (a same-named directory deeper in the tree than a declared \"reviews/\") are counted in both. Its existing non-record skips stay as they are (\".git/\", \"__pycache__/\", \".venv/\", \"tests/\", \"test/\" wherever they appear). Parity: for a committed tree with no uncommitted changes, inventory(target, True) == inventory(target, False), with records, record neighbours and dot-directories present.\nR5. The validators see what R3 shows. A member whose policy has no-tree-changes (e.g. sibi) and whose call changed hunsu.py, hunsu_helper.py or hunsu-notes.md is failed (status \"failed\", \"no-tree-changes\" in validation.failed); a member with only-tests-touched (e.g. teujip) whose call changed hunsu_helper.py outside the tests it declared is failed with the non-claim \"only-tests-touched: changed outside the tests it declared: hunsu_helper.py\" (no transcript, or one that names the file). A call that changed only an ENV file (e.g. hunsu.lock.json or hunsu-conflicts.md) or a file under \".chongdae/\" or a declared record directory fails neither validator.\nR6. Protected tests keep their protection (preservation): tests-kept still compares each requested test's contents from before and after the call, so a build that changes a requested test is refused even when the test sits at a record path (e.g. under \".chongdae/\" or a declared record directory) or is committed.\nR7. Nothing else changes (preservation): worker.py imports nothing from a sibling plugin; red-before-build, checks-ran, quotes-required and explanation-kept behave as before apart from seeing the newly visible paths; test_native_prompt.py and test_hostcall_env.py keep passing.",
+  "closes": [],
+  "contract": {},
+  "checks": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_record_paths.py"
+    ],
+    [
+      "python3",
+      "test_hacheong.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_native_prompt.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "test_hostcall_env.py"
+    ]
+  ],
+  "tests": [
+    "test_record_paths.py",
+    "test_hacheong.py",
+    "test_native_prompt.py",
+    "test_hostcall_env.py"
+  ],
+  "response": "./.chongdae/run-20261030-074733-8d14/local/a-record-build.response.json"
+}

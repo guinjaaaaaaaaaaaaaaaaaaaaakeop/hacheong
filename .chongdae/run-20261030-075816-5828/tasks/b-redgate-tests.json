@@ -1,0 +1,225 @@
+{
+  "artifact-type": "chongdae/task@1",
+  "written_by": "chongdae 1.24.0",
+  "status": "done",
+  "def": {
+    "id": "b-redgate-tests",
+    "role": "nitpick",
+    "brief": "Write the regression tests for contract B. (1) New file test_red_gate.py at the project root: unittest TestCase classes runnable as `python3 -m unittest test_red_gate.py`, every method named with its sentence id (test_G1_... to test_G8_...). Decide G2-G4 on real fixture files in temporary directories (git repositories where validate needs one), calling worker.unittest_red and worker.validate (a member from worker.load_member(\"teujip\")) — the harness really runs; G1 may call worker.red_verdict directly, but only to show that malformed or missing reports are \"unverified\" and to pin the order of its rules: the red and green verdicts must be shown by real harness runs, never by a hand-made report. (2) test_hacheong.py: its red-before-build fixtures that are red only because a test body raises an import error (`import app`, `import backup` inside a test method, e.g. around its lines 264, 312, 409, 419 and 451) codify the defect: amend each such fixture to a genuine assertion failure that expresses the same missing feature (e.g. self.fail('not built') or an assertion that the module can be found), deliberately, and change no expectation and nothing else in test_hacheong.py. Import the candidate from this directory (`import worker`), never an installed plugin; no model, host or network calls; remove every temporary directory. Every test that fails today must fail by an assertion, never by an AttributeError, import, loader or runtime error of the test itself: reach worker.unittest_red and worker.red_verdict through getattr with an assertion that they exist before calling them. Run once: test_red_gate.py must show failures only (zero errors); `python3 test_hacheong.py` must show every test PASS after your amendments (they are compatible with today's gate; the red comes from test_red_gate.py). G5, G7 and G8 are preservation sentences whose tests may pass now and after the build; G6 is not testable — say so in non-claims. Do not change test_record_paths.py, test_native_prompt.py, test_hostcall_env.py or any non-test file.\n\nCONTRACT B (sentences G1-G8). Defect: worker.py's red-before-build runs `python3 -m unittest <test file>` and takes ANY non-zero exit as proof the file is red — an import error, a syntax error, a loader error, a module with no tests (exit 5), a crash. Fix, bounded: unittest stays the only runner verified automatically; the verdict comes from a structured report built from unittest's own TestResult; red requires at least one test actually run and at least one genuine assertion failure inside a test body, with no error of any kind. No runner is chosen from a file's extension; no new runner protocol; the answer schema and envelope, `lacked` and the unmet-capability reporting stay as they are.\n\nREPORT = the JSON object the harness writes, exactly these seven keys, each a non-negative int (a bool is not an int here): \"tests_run\" (unittest's testsRun), \"assertion_failures\" (failures whose traceback passes through the test method's own code — including a failing subTest inside it), \"fixture_failures\" (assertion failures raised outside the test method's body: setUp, tearDown, a cleanup), \"errors\" (every error unittest records — import, syntax and loader errors (unittest's _FailedTest), setUpClass/setUpModule/tearDown*Class/Module errors, and any non-assertion exception in setUp, a test body, a subTest or tearDown, SystemExit included), \"skipped\", \"expected_failures\", \"unexpected_successes\".\n\nG1. worker.red_verdict(report) -> (verdict, detail), verdict one of \"red\", \"green\", \"unverified\", detail a non-empty str. Anything but a dict holding all seven REPORT keys as non-negative ints (None, a str, a list, {}, a missing key, a str/float/bool/negative value) -> \"unverified\". Otherwise, in this order: errors > 0 -> \"unverified\"; fixture_failures > 0 -> \"unverified\" (an assertion failed outside a test body: it does not show the contract's test ran); tests_run == 0 -> \"unverified\" (detail names unittest: only unittest TestCase tests are verified); assertion_failures >= 1 -> \"red\"; else -> \"green\" (passes, or only skips, expected failures or unexpected successes — none of which proves red).\nG2. worker.unittest_red(target, path) -> (verdict, detail) runs one test file, `path` relative to `target`, in a fresh interpreter process (\"python3\" when on PATH, else \"python\", as today) with cwd=target and the file loaded the way `python -m unittest <path>` loads it (the target first on sys.path); a harness inside that process runs it with a TestResult that builds REPORT and hands REPORT back to the parent outside unittest's text output; the verdict is red_verdict(REPORT) — never the exit code alone and never a pattern matched in unittest's printed output. A harness process that exits non-zero or is killed, or that hands back no report or one that is not well-formed JSON (e.g. a test calls os._exit), gives \"unverified\". A path that does not end in \".py\" is not run at all: \"unverified\", detail naming unittest (only Python unittest files are verified automatically; a direct script, pytest or a JavaScript test is not run here). The gate writes nothing inside `target` beyond what importing the tests writes (no report file, no scratch there; `git status` shows nothing new besides __pycache__).\nG3. On real fixture files (temporary directories), unittest_red gives: \"red\" for a TestCase whose test body fails an assertion (self.fail, self.assertEqual, a bare `assert`, a failing subTest), also when other tests in the file pass or are skipped; \"green\" for all-passing tests, and for a file whose only non-passing outcomes are skips or expected failures; \"unverified\" for: an import of a missing module at the top of the file; a syntax error; an error raised inside a test body (NameError, ZeroDivisionError, an `import` of a missing module inside the test); setUp raising an error; setUp failing an assertion; tearDown raising an error or failing an assertion; setUpClass or setUpModule raising; sys.exit() inside a test; os._exit() inside a test (no report); a module with no TestCase tests (functions only, or a direct script that runs code at import); one genuine assertion failure in a file that also has any error; a path not ending in \".py\".\nG4. validate(), for a member whose policy has red-before-build (teujip), judges each file in the answer's `tests` with unittest_red: \"red\" passes; \"green\" is the existing problem \"red-before-build: <path> passes before the build — it decides nothing\" (wording unchanged), or — when code was already changed before the call (the existing built_before case) — the existing non-claim \"red-before-build could not decide <path>: it passes, and code was already changed before this call (…)\" with status unchanged; \"unverified\" is a new problem \"red-before-build: <path> is not verified red — <detail>\", whatever built_before says. Each problem makes the answer \"failed\" with \"red-before-build\" in validation.failed, as today.\nG5. Kept as they are (preservation): a request with `amending` skips the gate; a declared test its writer deleted is said as \"deleted by the writer: <path> — the contract retires it\" and skipped; a path in the request's `deleted-tests` that is absent is skipped; a declared test that never existed is the problem \"red-before-build: <path> does not exist\".\nG6. The historical record is not rewritten: nothing re-labels an earlier answer; the gate judges only the call it runs in.\nG7. Nothing else changes: only worker.py changes; no answer schema, envelope, `lacked` or `needs` behaviour changes; other validators (no-tree-changes, only-tests-touched, checks-ran, tests-kept, explanation-kept, quotes-required, readme-only) behave as before; the record-path rule of the previous slice stays; test_record_paths.py, test_native_prompt.py and test_hostcall_env.py keep passing.\nG8. No timeout or runner option is added (a test file that hangs hangs the call, as today); hostcall.py is not touched.",
+    "closes": [],
+    "needs": [],
+    "checks": [],
+    "tests": [
+      "test_red_gate.py",
+      "test_hacheong.py"
+    ],
+    "gate": null,
+    "scope": [
+      "test_hacheong.py",
+      "test_red_gate.py"
+    ]
+  },
+  "seq": 1,
+  "added": "2026-10-30T07:58:35+00:00",
+  "non-claims": [
+    "no check decides this task; done means the agent said so",
+    "(provider) G6 is not testable: \"The historical record is not rewritten: nothing re-labels an earlier answer; the gate judges only the call it runs in.\" No test can see that past answers stay unrelabelled.",
+    "(provider) G2 \"(\\\"python3\\\" when on PATH, else \\\"python\\\", as today)\": no test checks the fallback to `python` when python3 is not on PATH.",
+    "(provider) G2 \"hands REPORT back to the parent outside unittest's text output\": tested only indirectly. A test that prints or os.writes fake unittest text and a fake REPORT JSON to stdout/stderr must not change the verdict, and os._exit after printing a fake report gives unverified. The channel the harness actually uses is not observed.",
+    "(provider) G2 \"the target first on sys.path\": the test shows that a module at the target root can be imported by a test under tests/. It does not show that the target comes before other sys.path entries.",
+    "(provider) G2 \"no report file, no scratch there\": tested only inside target (git status with ignored and untracked files, plus a directory listing, excluding __pycache__). Scratch the harness leaves outside target, e.g. in the system temp dir, is not checked.",
+    "(provider) G7 \"only worker.py changes; no answer schema, envelope, `lacked` or `needs` behaviour changes; other validators … behave as before\": tested only through the unchanged VALIDATORS tuple and validate signature, only-tests-touched still firing, the three earlier test files being unchanged against HEAD and passing, and the existing test_hacheong.py suite. Changes to other files in the tree are not checked, because the working tree already holds unrelated modifications.",
+    "(provider) G8 \"No timeout or runner option is added (a test file that hangs hangs the call, as today)\": a hanging fixture is not run, because it would hang the suite. test_G8_no_timeout_passed_to_the_process wraps subprocess.run, Popen.communicate and Popen.wait to check that no timeout is passed and that a process is observed. A harness started by other means (os.posix_spawn, or `from subprocess import run`) would fail that test without breaking the sentence.",
+    "(provider) The test_hacheong.py fixtures at lines 264, 312, 409, 419 and 451 changed from `import app` / `import backup` inside the test body to `self.assertIsNotNone(importlib.util.find_spec('<mod>'), '<mod> is not built')`, with importlib.util imported on the fixture's import line. No expectation or other line changed."
+  ],
+  "response": {
+    "status": "done",
+    "summary": "I wrote test_red_gate.py: 65 unittest methods named test_G1_… to test_G8_…. They import the worker module from this directory and run it on real fixture files in temporary directories, using git repos where validate needs one; every temporary directory is removed. One run of `python3 -m unittest test_red_gate.py` gave FAILED (failures=57) and zero errors. Every failure is an assertion: either \"worker.unittest_red / worker.red_verdict does not exist\" (both are reached through getattr) or validate returning 'done' where 'failed' is expected. Eight tests pass now. These are the preservation tests for G5 (4), G7 (3) and G8 (hostcall.py untouched). In test_hacheong.py I changed only the five red-before-build fixtures that were red because of an `import app` / `import backup` inside a test body (lines 264, 312, 409, 419, 451). Each now fails an assertion instead: `self.assertIsNotNone(importlib.util.find_spec('<mod>'), '<mod> is not built')`, with `importlib.util` added to that fixture's import line. That keeps their meaning: they pass once app.py or backup.py exists, which the built_before cases at 327 and 457 rely on. No expectation changed, and `python3 test_hacheong.py` printed every test PASS (\"all passed\"). No other file was touched.",
+    "tests": [
+      "test_red_gate.py",
+      "test_hacheong.py"
+    ],
+    "covers": [
+      {
+        "section": "G1",
+        "tests": [
+          "test_G1_non_dicts_are_unverified",
+          "test_G1_empty_or_missing_key_is_unverified",
+          "test_G1_wrong_typed_or_negative_values_are_unverified",
+          "test_G1_errors_come_first",
+          "test_G1_fixture_failures_before_tests_run_and_assertions",
+          "test_G1_no_test_run_is_unverified_and_names_unittest",
+          "test_G1_assertion_failure_is_red_by_a_real_run",
+          "test_G1_only_skips_expected_failures_or_unexpected_successes_are_green_by_a_real_run"
+        ]
+      },
+      {
+        "section": "G2",
+        "tests": [
+          "test_G2_returns_a_verdict_and_a_detail",
+          "test_G2_a_path_not_ending_in_py_is_not_run",
+          "test_G2_runs_in_a_fresh_interpreter",
+          "test_G2_cwd_is_the_target",
+          "test_G2_the_target_is_on_sys_path_as_python_m_unittest_loads",
+          "test_G2_a_file_at_the_target_root",
+          "test_G2_printed_output_is_not_the_verdict",
+          "test_G2_os_exit_zero_gives_no_report",
+          "test_G2_os_exit_nonzero_gives_no_report",
+          "test_G2_a_killed_harness_is_unverified",
+          "test_G2_writes_nothing_in_the_target_but_pycache"
+        ]
+      },
+      {
+        "section": "G3",
+        "tests": [
+          "test_G3_self_fail_is_red",
+          "test_G3_assert_equal_is_red",
+          "test_G3_bare_assert_is_red",
+          "test_G3_assertion_in_a_helper_called_from_the_body_is_red",
+          "test_G3_failing_subtest_is_red",
+          "test_G3_red_alongside_passing_and_skipped_tests",
+          "test_G3_all_passing_is_green",
+          "test_G3_skips_and_expected_failures_only_are_green",
+          "test_G3_missing_module_at_the_top_is_unverified",
+          "test_G3_syntax_error_is_unverified",
+          "test_G3_name_error_in_body_is_unverified",
+          "test_G3_zero_division_in_body_is_unverified",
+          "test_G3_import_of_missing_module_inside_body_is_unverified",
+          "test_G3_error_inside_a_subtest_is_unverified",
+          "test_G3_setup_raising_is_unverified",
+          "test_G3_setup_failing_an_assertion_is_unverified",
+          "test_G3_teardown_raising_is_unverified",
+          "test_G3_teardown_failing_an_assertion_is_unverified",
+          "test_G3_cleanup_failing_an_assertion_is_unverified",
+          "test_G3_setupclass_raising_is_unverified",
+          "test_G3_setupmodule_raising_is_unverified",
+          "test_G3_teardown_class_or_module_raising_is_unverified",
+          "test_G3_sys_exit_in_a_test_is_unverified",
+          "test_G3_os_exit_in_a_test_is_unverified",
+          "test_G3_functions_only_module_is_unverified",
+          "test_G3_direct_script_is_unverified",
+          "test_G3_one_assertion_failure_with_any_error_is_unverified",
+          "test_G3_path_not_ending_in_py_is_unverified"
+        ]
+      },
+      {
+        "section": "G4",
+        "tests": [
+          "test_G4_red_passes",
+          "test_G4_import_error_is_not_verified_red",
+          "test_G4_no_tests_is_not_verified_red",
+          "test_G4_unverified_whatever_built_before_says",
+          "test_G4_green_is_the_existing_problem",
+          "test_G4_unexpected_success_is_green_not_red",
+          "test_G4_green_with_code_built_before_is_the_existing_non_claim",
+          "test_G4_each_file_judged_one_unverified_fails_the_answer"
+        ]
+      },
+      {
+        "section": "G5",
+        "tests": [
+          "test_G5_amending_skips_the_gate",
+          "test_G5_deleted_by_the_writer_is_said_and_skipped",
+          "test_G5_deleted_tests_of_the_request_are_skipped",
+          "test_G5_a_test_that_never_existed_is_the_problem"
+        ]
+      },
+      {
+        "section": "G7",
+        "tests": [
+          "test_G7_validators_and_validate_signature_unchanged",
+          "test_G7_only_tests_touched_still_fires",
+          "test_G7_previous_slices_tests_unchanged_and_passing"
+        ]
+      },
+      {
+        "section": "G8",
+        "tests": [
+          "test_G8_hostcall_untouched",
+          "test_G8_unittest_red_takes_no_option",
+          "test_G8_no_timeout_passed_to_the_process"
+        ]
+      }
+    ],
+    "non-claims": [
+      "G6 is not testable: \"The historical record is not rewritten: nothing re-labels an earlier answer; the gate judges only the call it runs in.\" No test can see that past answers stay unrelabelled.",
+      "G2 \"(\\\"python3\\\" when on PATH, else \\\"python\\\", as today)\": no test checks the fallback to `python` when python3 is not on PATH.",
+      "G2 \"hands REPORT back to the parent outside unittest's text output\": tested only indirectly. A test that prints or os.writes fake unittest text and a fake REPORT JSON to stdout/stderr must not change the verdict, and os._exit after printing a fake report gives unverified. The channel the harness actually uses is not observed.",
+      "G2 \"the target first on sys.path\": the test shows that a module at the target root can be imported by a test under tests/. It does not show that the target comes before other sys.path entries.",
+      "G2 \"no report file, no scratch there\": tested only inside target (git status with ignored and untracked files, plus a directory listing, excluding __pycache__). Scratch the harness leaves outside target, e.g. in the system temp dir, is not checked.",
+      "G7 \"only worker.py changes; no answer schema, envelope, `lacked` or `needs` behaviour changes; other validators … behave as before\": tested only through the unchanged VALIDATORS tuple and validate signature, only-tests-touched still firing, the three earlier test files being unchanged against HEAD and passing, and the existing test_hacheong.py suite. Changes to other files in the tree are not checked, because the working tree already holds unrelated modifications.",
+      "G8 \"No timeout or runner option is added (a test file that hangs hangs the call, as today)\": a hanging fixture is not run, because it would hang the suite. test_G8_no_timeout_passed_to_the_process wraps subprocess.run, Popen.communicate and Popen.wait to check that no timeout is passed and that a process is observed. A harness started by other means (os.posix_spawn, or `from subprocess import run`) would fail that test without breaking the sentence.",
+      "The test_hacheong.py fixtures at lines 264, 312, 409, 419 and 451 changed from `import app` / `import backup` inside the test body to `self.assertIsNotNone(importlib.util.find_spec('<mod>'), '<mod> is not built')`, with importlib.util imported on the fixture's import line. No expectation or other line changed."
+    ],
+    "worker": {
+      "host": "claude-code",
+      "model": "claude-opus-5-5",
+      "turns": 11,
+      "cost_usd": 0.9801746000000001
+    }
+  },
+  "answered": {
+    "at": "2026-10-30T08:03:12+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "touched_by_provider": [
+    "test_hacheong.py",
+    "test_red_gate.py"
+  ],
+  "performed_by": {
+    "provider": "command",
+    "argv": [
+      "python3",
+      "{plugin:hacheong}/worker.py",
+      "--member",
+      "teujip",
+      "--request",
+      "{request}",
+      "--response",
+      "{response}",
+      "--host",
+      "claude"
+    ],
+    "host": "claude-code",
+    "model": "claude-opus-5-5",
+    "turns": 11,
+    "cost_usd": 0.9801746000000001,
+    "versions": {
+      "used": {
+        "hacheong": "1.12.1",
+        "chongdae": "1.24.0"
+      }
+    },
+    "trace": {
+      "changed": [
+        "write ./test_red_gate.py"
+      ],
+      "commands-run": 8,
+      "commands-failed": 0
+    }
+  },
+  "checks": [],
+  "touched": [
+    "test_hacheong.py",
+    "test_red_gate.py"
+  ],
+  "done": {
+    "at": "2026-10-30T08:03:12+00:00",
+    "chongdae": "chongdae 1.24.0"
+  },
+  "seen-non-claims": {
+    "by": "verifier of b-portable-build",
+    "texts": [
+      "(provider) G6 is not testable: \"The historical record is not rewritten: nothing re-labels an earlier answer; the gate judges only the call it runs in.\" No test can see that past answers stay unrelabelled.",
+      "(provider) G2 \"(\\\"python3\\\" when on PATH, else \\\"python\\\", as today)\": no test checks the fallback to `python` when python3 is not on PATH.",
+      "(provider) G2 \"hands REPORT back to the parent outside unittest's text output\": tested only indirectly. A test that prints or os.writes fake unittest text and a fake REPORT JSON to stdout/stderr must not change the verdict, and os._exit after printing a fake report gives unverified. The channel the harness actually uses is not observed.",
+      "(provider) G2 \"the target first on sys.path\": the test shows that a module at the target root can be imported by a test under tests/. It does not show that the target comes before other sys.path entries.",
+      "(provider) G2 \"no report file, no scratch there\": tested only inside target (git status with ignored and untracked files, plus a directory listing, excluding __pycache__). Scratch the harness leaves outside target, e.g. in the system temp dir, is not checked.",
+      "(provider) G7 \"only worker.py changes; no answer schema, envelope, `lacked` or `needs` behaviour changes; other validators … behave as before\": tested only through the unchanged VALIDATORS tuple and validate signature, only-tests-touched still firing, the three earlier test files being unchanged against HEAD and passing, and the existing test_hacheong.py suite. Changes to other files in the tree are not checked, because the working tree already holds unrelated modifications.",
+      "(provider) G8 \"No timeout or runner option is added (a test file that hangs hangs the call, as today)\": a hanging fixture is not run, because it would hang the suite. test_G8_no_timeout_passed_to_the_process wraps subprocess.run, Popen.communicate and Popen.wait to check that no timeout is passed and that a process is observed. A harness started by other means (os.posix_spawn, or `from subprocess import run`) would fail that test without breaking the sentence.",
+      "(provider) The test_hacheong.py fixtures at lines 264, 312, 409, 419 and 451 changed from `import app` / `import backup` inside the test body to `self.assertIsNotNone(importlib.util.find_spec('<mod>'), '<mod> is not built')`, with importlib.util imported on the fixture's import line. No expectation or other line changed."
+    ],
+    "at": "2026-10-30T08:16:50+00:00",
+    "chongdae": "chongdae 1.24.0"
+  }
+}

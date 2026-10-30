@@ -261,7 +261,7 @@ def test_validators_fire_on_recorded_cases():
         assert w.leading_cd(["cd", "tests", "&&", "cd", "../..", "&&", "pytest"], r.dir)[0] is None
         # red-before-build and only-tests-touched: teujip's tests must fail now, and only tests may change
         teujip = w.load_member("teujip")
-        r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        import app\n")
+        r.write("tests/test_x.py", "import importlib.util, unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        self.assertIsNotNone(importlib.util.find_spec('app'), 'app is not built')\n")
         before2 = w.tree_state(r.dir)
         ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_x.py"], "covers": [{"section": "Q-add", "tests": ["test_Q_add_appends"]}]}
         assert w.validate(json.loads(json.dumps(ans)), teujip, REQUEST, r.dir, "", "claude-code", before)["status"] == "done", "red: app is missing"
@@ -309,7 +309,7 @@ def test_the_tests_guards_judge_this_member_not_the_tree():
     with Repo() as r:
         teujip = w.load_member("teujip")
         before = w.tree_state(r.dir)
-        r.write("tests/test_x.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        import app\n")
+        r.write("tests/test_x.py", "import importlib.util, unittest\nclass T(unittest.TestCase):\n    def test_Q_add_appends(self):\n        self.assertIsNotNone(importlib.util.find_spec('app'), 'app is not built')\n")
         r.write("src_auth.py", "x = 1\n")   # the session's edit, during the call
         ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_x.py"], "covers": [{"section": "Q-add", "tests": ["test_Q_add_appends"]}]}
         mine = claude_stream(("Write", {"file_path": r.dir + "/tests/test_x.py"}), result=ans)
@@ -406,7 +406,7 @@ def test_a_test_the_writer_deleted_is_the_contracts_change_not_a_missing_test():
     with Repo() as r:
         cleanup_repo(r)
         teujip = w.load_member("teujip")
-        new = "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        import backup\n"
+        new = "import importlib.util, unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        self.assertIsNotNone(importlib.util.find_spec('backup'), 'backup is not built')\n"
         ans = {"status": "done", "summary": "", "non-claims": [], "tests": ["tests/test_backup.py"] + RETIRED + ["tests/test_read.py"],
                "covers": [{"section": "Q-cleanup", "tests": ["test_Q_cleanup_backup"]}]}
         request = dict(REQUEST, closes=["Q-cleanup"], tests=list(ans["tests"]))
@@ -416,7 +416,7 @@ def test_a_test_the_writer_deleted_is_the_contracts_change_not_a_missing_test():
         for t in RETIRED:
             os.remove(os.path.join(r.dir, t))
         r.write("tests/test_backup.py", new)
-        r.write("tests/test_read.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_read(self):\n        import backup\n")
+        r.write("tests/test_read.py", "import importlib.util, unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_read(self):\n        self.assertIsNotNone(importlib.util.find_spec('backup'), 'backup is not built')\n")
         out = w.validate(json.loads(json.dumps(ans)), teujip, request, r.dir, "", "claude-code", before)
         assert out["status"] == "done", out
         for t in RETIRED:
@@ -448,7 +448,7 @@ def test_a_build_keeps_the_contracts_deleted_tests_deleted():
         cleanup_repo(r)
         for t in RETIRED:
             os.remove(os.path.join(r.dir, t))
-        r.write("tests/test_backup.py", "import unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        import backup\n")
+        r.write("tests/test_backup.py", "import importlib.util, unittest\nclass T(unittest.TestCase):\n    def test_Q_cleanup_backup(self):\n        self.assertIsNotNone(importlib.util.find_spec('backup'), 'backup is not built')\n")
         dakdol = w.load_member("dakdol")
         request = dict(REQUEST, closes=["Q-cleanup"], tests=["tests/test_backup.py", "tests/test_read.py"], **{"deleted-tests": list(RETIRED)})
         ran = claude_stream(("Bash", {"command": "python -m unittest tests/test_x.py -k Q_add"}))

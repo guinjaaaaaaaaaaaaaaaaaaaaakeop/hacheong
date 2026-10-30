@@ -1,7 +1,7 @@
 # hacheong (하청)
 
 The subcontractor of the LLM-development era: the people a plan hires by role. Each member is a **disposition**, not a
-job — the same person can be sent at code today and at a plan or a design tomorrow — and each call is a fresh, bounded
+job — the same person can be sent at code today and at a plan or a design tomorrow — and each call is a fresh
 process with one answer. One runner serves every member; a member is a directory (a role text, an answer schema, a
 policy), so anyone can add one. What a member may not do is enforced after the fact by the runner, never merely asked
 of the model.
@@ -15,7 +15,9 @@ of the model.
 
 ## Install
 
-```
+Requires **Python 3.11 or later**. CLI and hook examples invoke `python3`; ensure that command resolves to a supported interpreter.
+
+```sh
 claude plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong
 claude plugin install hacheong@hacheong
 ```
@@ -24,11 +26,34 @@ Codex: `codex plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong`, `
 project declares who it hires in hunsu.json: `"roles": {"implementer": "hacheong:build", "verifier": "dwitbuk:eyes"}`
 — hunsu resolves `hacheong:build` to the argv below and locks it; chongdae spawns argv.
 
+## Shared guidance and hosts
+
+[skills/hire/SKILL.md](skills/hire/SKILL.md) is the shared installed procedure for Claude Code and Codex. Both use
+this same file; there is no separate host-specific copy of the hiring workflow. The Python CLI is also shared.
+For example, replace these quoted paths with the plugin and project directories:
+
+```sh
+python3 "/path/to/hacheong/hacheong.py" roster --target "/path/to/project"
+python3 "/path/to/hacheong/worker.py" --help
+```
+
+`worker.py --host claude` or `--host codex` selects the worker adapter. Installation, permissions and host settings
+remain host-specific; the `.claude-plugin/`, `.codex-plugin/` and `.agents/plugins/` manifests describe packaging.
+Host entry points should refer to the shared skill or invoke their declared CLI action, not maintain another workflow.
+
+[AGENTS.md](AGENTS.md) holds source-repository maintenance guidance. It is not automatically injected into a project
+that installs this plugin. Codex discovers repository guidance along its project path. [Codex guidance loading](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+Claude Code's direct `AGENTS.md` support depends on version and settings; [CLAUDE.md](CLAUDE.md) contains only
+`@AGENTS.md` as a compatibility import, so the maintainer rules still have one source. [Claude memory and imports](https://code.claude.com/docs/en/memory#share-one-file-with-other-coding-tools).
+
 ## How a member is called
 
 ```
-python3 <plugin root>/worker.py --member <name> --request <chongdae/request@1> --response <file> [--host claude|codex] [--model M] [--effort E] [--max-turns N] [--domain D]
+python3 "<plugin root>/worker.py" --member <name> --request <request-file> --response <response-file> [--host claude|codex] [--model M] [--effort E] [--max-turns N] [--domain D]
 ```
+
+This is argument notation: replace placeholders and choose one host. `--request` takes a JSON file whose
+`artifact-type` is `chongdae/request@1`, not the artifact type string itself. The default host is `claude`.
 
 The runner assembles the prompt — `members/<name>/ROLE.md` ⊕ `domains/<domain>/DOMAIN.md` (its common part and the `##
 <member>` section) ⊕ the request — starts a fresh host session with the member's `policy.json` (tools, sandbox, turn
@@ -46,8 +71,10 @@ and `lacked` (`network` | `loopback`: what the place it ran lacked; listed in th
 output schema is strict, but `[]` is written out as no field) — plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an
 answer that broke its own rules is not an answer.
 
-`--prompt-only` prints the exact prompt instead of calling a host — for a session that dispatches its host's own
-subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer verbatim.
+`--prompt-only` prints the role/domain/request and answer schema, then exits — for a session that dispatches its host's
+own subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer verbatim. It does not run capability
+checks, a host session or the post-call validators. Its environment section currently uses the Claude member settings,
+even with `--host codex`; that text is not evidence of the native session's actual tools or capabilities.
 
 ## Validators (the runner's, chosen per member in `policy.json`)
 
@@ -80,6 +107,11 @@ the validator set. A member may not change these; when they must change, this pl
 
 ## Limits
 
+- `--max-turns` and `HACHEONG_CONTINUATIONS` bound Claude calls only. The Codex adapter passes no turn or wall-clock
+  limit to `codex exec`; its call ends when the host exits.
+- `red-before-build` currently runs each declared test through `python3 -m unittest` (falling back to `python`).
+  A nonzero exit counts as red; the validator does not distinguish an assertion failure from an import or runner error.
+  It does not select a JavaScript or other test runner from the file extension.
 - Four domains shipped: `code`; `refactor` (placement changes, behavior and explanation do not: the runner compares
   the project's public names, docstrings and comment lines with HEAD and refuses a builder's answer where any shrank —
   `explanation-kept`; the nitpicker adds no placement tests; the eyes are told to look for words the diff removed and
@@ -143,11 +175,13 @@ the validator set. A member may not change these; when they must change, this pl
 - **A contract that retires a feature retires its tests.** The tests writer deletes them, and a declared test it deleted
   is that change, not a missing test (guin-site Q-cleanup: four retired files refused a finished tests task four times as
   "does not exist"). The build request names them in `deleted-tests`; `tests-kept` holds them deleted.
-- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `tests-kept`, `explanation-kept`) — the products' records —
+- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
   comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
 - `tests-kept` snapshots each requested test's contents immediately before the host call and compares them after it.
   Committing a modified test, putting it in an ignored nested repository, or working without git does not hide a change.
-  Other tree validators still use git status; this content snapshot protects the request's tests specifically.
+  Requested tests under record paths are protected too. `no-tree-changes` and `only-tests-touched` still compare git-status
+  snapshots; `explanation-kept` compares the current Python inventory with HEAD. The content snapshot protects the
+  request's tests specifically.
 
 ## Versioning
 
@@ -156,6 +190,22 @@ in all three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plu
 entries before it is used anywhere. **patch**: behavior or wording, every interface unchanged. **minor**: a new
 member, field, validator or domain; what exists keeps working. **major**: the request, the envelope, or `worker`
 changes shape.
+
+### Release and adoption
+
+Documentation and shared instruction edits also need a patch bump when interfaces stay unchanged.
+Keep the version equal in `plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+and `.claude-plugin/marketplace.json` (both `metadata.version` and this product's `plugins[].version`).
+`.agents/plugins/marketplace.json` currently has no version field; verify its product name and source path,
+but do not invent a version field there.
+
+Before publication, run the relevant checks in **Self-check** for behavior changes; for documentation-only
+changes, verify links, command examples, imports and manifest consistency, plus `git diff --check`.
+Publish the checked commit using this repository's existing release convention. Publication does not update
+consumer installations: update the plugin through the host's supported workflow, reconcile the consuming
+project's declared environment and lock if managed, and start a new host session to apply the installation.
+Report publication, project adoption and live-host verification separately. Refreshing a locally linked
+plugin is not an update procedure for every remote installation.
 
 ## Self-check
 

@@ -3,7 +3,7 @@
   "name": "hacheong",
   "version": "1.12.1",
   "engines": {
-    "python": ">=3.9"
+    "python": ">=3.11"
   },
   "records": [],
   "roles": {

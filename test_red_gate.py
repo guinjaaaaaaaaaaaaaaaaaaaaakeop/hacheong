@@ -565,5 +565,96 @@ class G8NoTimeout(Gate):
         self.assertEqual([s for s in seen if s[1] is not None], [], seen)
 
 
+
+class G9NoPassFds(Gate):
+    """subprocess.Popen replaced by one that refuses a non-empty pass_fds as CPython does on Windows."""
+
+    def windows_popen(self, seen, refuse=True):
+        real = subprocess.Popen
+
+        class WindowsPopen(real):
+            def __init__(self_, *a, **k):
+                seen.append(tuple(k.get("pass_fds") or ()))
+                if refuse and k.get("pass_fds"):
+                    raise AssertionError("pass_fds not supported on Windows.")
+                super().__init__(*a, **k)
+
+        return mock.patch("subprocess.Popen", WindowsPopen)
+
+    def call(self, d, rel, seen, refuse=True):
+        ur = self.fn("unittest_red")
+        try:
+            with self.windows_popen(seen, refuse):
+                got = ur(d, rel)
+        except BaseException as e:  # noqa: B902 — a raise is the failure under test, not an error of the test
+            self.fail("unittest_red raised %s: %s" % (type(e).__name__, e))
+        self.assertTrue(seen, "the harness was not started through subprocess.Popen")
+        return self.shape(got)
+
+    def windows_verdict(self, want, text, rel="tests/test_x.py"):
+        d = self.tmp()
+        self.write(d, rel, text)
+        seen = []
+        got = self.call(d, rel, seen)
+        self.assertEqual(got[0], want, "%s\n--- fixture ---\n%s" % (got, text))
+        return got
+
+    def test_G9_self_fail_is_red_without_pass_fds(self):
+        self.windows_verdict("red", RED_FAIL)
+
+    def test_G9_all_passing_is_green_without_pass_fds(self):
+        self.windows_verdict("green", GREEN)
+
+    def test_G9_missing_module_at_the_top_is_unverified_without_pass_fds(self):
+        self.windows_verdict("unverified", "import unittest\nimport app_not_built_q\nclass T(unittest.TestCase):\n"
+                             "    def test_Q_add(self):\n        self.fail('x')\n")
+
+    def test_G9_os_exit_zero_is_unverified_without_pass_fds(self):
+        fake = json.dumps(report(tests_run=1))
+        self.windows_verdict("unverified", "import os, unittest\nclass T(unittest.TestCase):\n    def test_Q_add(self):\n"
+                             "        print(%r); os._exit(0)\n" % fake)
+
+    def test_G9_no_file_descriptor_is_passed_even_where_allowed(self):
+        d = self.tmp()
+        self.write(d, "tests/test_x.py", RED_FAIL)
+        seen = []
+        self.assertEqual(self.call(d, "tests/test_x.py", seen, refuse=False)[0], "red")
+        self.assertEqual([fds for fds in seen if fds], [], "pass_fds given to the harness: %r" % seen)
+
+    def test_G9_printed_output_is_still_not_the_verdict(self):
+        fake = json.dumps(report(tests_run=1, assertion_failures=1))
+        self.windows_verdict("green", "import sys, os, unittest\nclass T(unittest.TestCase):\n    def test_Q_add(self):\n"
+                             "        msg = 'FAIL: test_Q_add\\nAssertionError\\nFAILED (failures=1)\\n' + %r + '\\n'\n"
+                             "        print(msg); sys.stderr.write(msg); os.write(1, msg.encode()); os.write(2, msg.encode())\n" % fake)
+        ok = json.dumps(report(tests_run=1))
+        self.windows_verdict("red", "import sys, os, unittest\nclass T(unittest.TestCase):\n    def test_Q_add(self):\n"
+                             "        msg = '\\nRan 1 test in 0.000s\\n\\nOK\\n' + %r + '\\n'\n"
+                             "        print(msg); sys.stderr.write(msg); os.write(1, msg.encode()); os.write(2, msg.encode())\n"
+                             "        self.fail('not built')\n" % ok)
+
+    def test_G9_leaves_nothing_in_the_target_but_pycache_and_removes_its_scratch(self):
+        d = self.repo()
+        cases = {"tests/test_red.py": RED_FAIL, "tests/test_green.py": GREEN,
+                 "tests/test_err.py": "import nowhere_q\n" + RED_FAIL, "test_root.py": RED_FAIL,
+                 "tests/test_exit.py": "import os, unittest\nclass T(unittest.TestCase):\n    def test_Q_add(self):\n        os._exit(0)\n"}
+        want = {"tests/test_red.py": "red", "tests/test_green.py": "green", "tests/test_err.py": "unverified", "test_root.py": "red",
+                "tests/test_exit.py": "unverified"}
+        for rel, text in cases.items():
+            self.write(d, rel, text)
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+        subprocess.run(["git", "commit", "-qm", "fixtures"], cwd=d, check=True)
+        listing = lambda: sorted(os.path.relpath(os.path.join(a, f), d) for a, _, fs in os.walk(d) if ".git" not in a.split(os.sep)
+                                 and "__pycache__" not in a.split(os.sep) for f in fs)
+        before = listing()
+        scratch = self.tmp()   # where a scratch file made through tempfile would go; it must be gone afterwards
+        with mock.patch.object(tempfile, "tempdir", scratch), mock.patch.dict(os.environ, {"TMPDIR": scratch, "TEMP": scratch, "TMP": scratch}):
+            for rel in cases:
+                seen = []
+                self.assertEqual(self.call(d, rel, seen)[0], want[rel], rel)
+        st = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--ignored"], cwd=d, capture_output=True, text=True).stdout
+        self.assertEqual([l for l in st.splitlines() if "__pycache__" not in l], [], st)
+        self.assertEqual(listing(), before)
+        self.assertEqual(os.listdir(scratch), [], "scratch left behind")
+
 if __name__ == "__main__":
     unittest.main()

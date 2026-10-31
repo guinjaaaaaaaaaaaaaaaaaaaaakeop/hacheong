@@ -175,15 +175,19 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
   hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
-  A child host starts without exactly six variables this family reads for host and session attribution
-  (`CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`, `CODEX_VERSION`),
-  with `AGENT_HOST` naming its own host and `AGENT_WORKER=1`. Every other variable — configuration, credentials and
-  other metadata — passes through on purpose; this is not a promise that every variable that looks like an identity is
-  removed (`CODEX_SESSION_ID`, `CODEX_TOOL_CALL_ID` and `CODEX_CI`, which nothing in this family reads, are kept). The
-  self-check shows it with `subprocess.run` mocked. Separately, this `hostcall.py` (sha256 `fa06077c…`) was run once
-  against the real Claude Code and Codex CLIs in a disposable fixture: the parent's six markers were gone, `AGENT_HOST`
-  and `AGENT_WORKER` were the child's, each CLI set its own session ids, the fixture was unchanged. That shows the
-  adapter in real CLI environments — not an installed plugin, project hooks, a release or its adoption.
+  A child host starts without exactly seven variables this family reads for host and session attribution
+  (`CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`,
+  `CODEX_VERSION`), with `AGENT_HOST` naming its own host and `AGENT_WORKER=1`. Every other variable — configuration,
+  credentials and other metadata — passes through on purpose; this is not a promise that every variable that looks like
+  an identity is removed (`CODEX_TOOL_CALL_ID` and `CODEX_CI`, which nothing in this family reads, are kept). The
+  self-check shows it with `subprocess.run` mocked. This `hostcall.py` (sha256 `e0404678…`) was run from a disposable
+  copy against the real Claude Code and Codex CLIs with a synthetic parent `CODEX_SESSION_ID`: the Claude child had no
+  `CODEX_SESSION_ID` and its own session id, the Codex child's `CODEX_SESSION_ID` was its own thread id, both had their
+  own `AGENT_HOST` and `AGENT_WORKER=1` and kept a near-miss name; the earlier copy, run the same way, handed the Claude
+  child the parent's value. Before that, the earlier copy (sha256 `fa06077c…`, which removed six and kept
+  `CODEX_SESSION_ID`) was run once against both CLIs in a disposable fixture: the parent's six markers were gone,
+  `AGENT_HOST` and `AGENT_WORKER` were the child's, each CLI set its own session ids, the fixture was unchanged. That
+  shows the adapter in real CLI environments — not an installed plugin, project hooks, a release or its adoption.
 
 - **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
   transcript names (a command it ran, a file it read, edited or wrote); a file changed during the call that the

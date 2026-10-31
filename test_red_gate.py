@@ -531,9 +531,21 @@ class G7NothingElse(Gate):
 
 class G8NoTimeout(Gate):
 
-    def test_G8_hostcall_untouched(self):
-        diff = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", "hostcall.py"], cwd=HERE)
-        self.assertEqual(diff.returncode, 0, "hostcall.py changed")
+    def test_G8_hostcall_passes_no_timeout(self):
+        import hostcall
+        d = self.tmp()
+        calls = []
+
+        def run(cmd, *a, **k):
+            calls.append(k)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with mock.patch.dict(os.environ, {"PATH": os.environ.get("PATH", ""), "HOME": d}, clear=True), \
+                mock.patch.object(subprocess, "run", run):
+            hostcall.run_claude("p", {"type": "object"}, cwd=d)
+            hostcall.run_codex("p", {"type": "object"}, d, beside=os.path.join(d, "r.json"))
+        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual([k for k in calls if "timeout" in k], [], calls)
 
     def test_G8_unittest_red_takes_no_option(self):
         ur = self.fn("unittest_red")

@@ -1,4 +1,4 @@
-"""Worker host calls start each child with its own host identity, not the parent's (H1-H6).
+"""Worker host calls start each child with its own host identity, not the parent's (H1-H6, S4).
 
   python3 -m unittest test_hostcall_env.py
 """
@@ -16,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import hostcall  # noqa: E402
 
-IDENTITY = ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CHONGDAE_SESSION", "AI_AGENT", "CLAUDE_PROJECT_DIR", "CODEX_VERSION")
+IDENTITY = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CHONGDAE_SESSION", "AI_AGENT", "CLAUDE_PROJECT_DIR", "CODEX_VERSION")
 
 BASE = {
     "HOME": "/home/synthetic",
@@ -31,17 +31,23 @@ BASE = {
     "CLAUDE_CODE_USE_BEDROCK": "0",
     "CODEX_MODEL": "synthetic-codex-model",
     "CODEX_THREAD_ID_NOTE": "near-miss-keep",
+    "CODEX_SESSION_ID_NOTE": "near-miss-keep",
     "CHONGDAE_WAIT": "near-miss-keep",
     "UNRELATED_VALUE": "keep me",
 }
 CLAUDE_PARENT = dict(BASE, AGENT_HOST="claude-code", CLAUDE_CODE_SESSION_ID="parent-claude", AI_AGENT="claude-code",
                      CLAUDE_PROJECT_DIR="/work/parent-project", CLAUDECODE="1")
-CODEX_PARENT = dict(BASE, AGENT_HOST="codex", CODEX_THREAD_ID="parent-codex", CODEX_VERSION="0.99.0")
-MIXED_PARENT = dict(BASE, AGENT_HOST="claude-code", CODEX_THREAD_ID="parent-codex", CODEX_VERSION="0.99.0",
+CODEX_PARENT = dict(BASE, AGENT_HOST="codex", CODEX_THREAD_ID="parent-codex", CODEX_SESSION_ID="parent-codex-session",
+                    CODEX_VERSION="0.99.0")
+CLAUDE_BY_CODEX_PARENT = dict(CLAUDE_PARENT, CODEX_SESSION_ID="parent-codex-session")
+MIXED_PARENT = dict(BASE, AGENT_HOST="claude-code", CODEX_THREAD_ID="parent-codex", CODEX_SESSION_ID="parent-codex-session",
+                    CODEX_VERSION="0.99.0",
                     CLAUDE_CODE_SESSION_ID="parent-claude", AI_AGENT="claude-code", CLAUDE_PROJECT_DIR="/work/parent-project",
                     CLAUDECODE="1", CHONGDAE_SESSION="parent-override")
 BARE_PARENT = dict(BASE)
-PARENTS = {"claude": CLAUDE_PARENT, "codex": CODEX_PARENT, "mixed": MIXED_PARENT, "bare": BARE_PARENT}
+PARENTS = {"claude": CLAUDE_PARENT, "codex": CODEX_PARENT, "claude-by-codex": CLAUDE_BY_CODEX_PARENT, "mixed": MIXED_PARENT,
+           "bare": BARE_PARENT}
+SESSION_PARENTS = {"codex": CODEX_PARENT, "claude-by-codex": CLAUDE_BY_CODEX_PARENT, "mixed": MIXED_PARENT}
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
 
@@ -231,7 +237,7 @@ class H3RunClaudeEnv(Base):
 class H4AnyParent(Base):
     KEEP = ("HOME", "PATH", "CODEX_HOME", "AGENT_CODEX_HOME", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
             "CODEX_API_KEY", "ANTHROPIC_MODEL", "CLAUDE_CODE_USE_BEDROCK", "CODEX_MODEL", "CODEX_THREAD_ID_NOTE",
-            "CHONGDAE_WAIT", "UNRELATED_VALUE")
+            "CODEX_SESSION_ID_NOTE", "CHONGDAE_WAIT", "UNRELATED_VALUE")
 
     def check(self, p, child):
         with mock.patch.dict(os.environ, p, clear=True):
@@ -265,6 +271,16 @@ class H4AnyParent(Base):
         self.check(MIXED_PARENT, "codex")
         self.check(MIXED_PARENT, "claude")
 
+    def test_H4_claude_parent_launched_by_codex_both_children(self):
+        self.check(CLAUDE_BY_CODEX_PARENT, "codex")
+        self.check(CLAUDE_BY_CODEX_PARENT, "claude")
+
+    def test_H4_every_parent_kind_both_children(self):
+        for name, p in PARENTS.items():
+            for child in ("codex", "claude"):
+                with self.subTest(parent=name, child=child):
+                    self.check(p, child)
+
     def test_H4_bare_parent_both_children(self):
         self.check(BARE_PARENT, "codex")
         self.check(BARE_PARENT, "claude")
@@ -279,6 +295,62 @@ class H4AnyParent(Base):
         p = dict(CLAUDE_PARENT, AGENT_CODEX_SANDBOX="workspace-write")
         self.assertEqual(self.check(p, "codex")["AGENT_CODEX_SANDBOX"], "workspace-write")
         self.assertEqual(self.check(p, "claude")["AGENT_CODEX_SANDBOX"], "workspace-write")
+
+
+class S4SessionIdKey(Base):
+    """The literal key "CODEX_SESSION_ID" never reaches a child, whichever host starts it."""
+
+    def assert_child_env(self, env, p, host):
+        self.assertNotIn("CODEX_SESSION_ID", env)
+        self.assertFalse(any(k == "CODEX_SESSION_ID" for k in env), "CODEX_SESSION_ID inherited by the child env")
+        self.assertEqual(env.get("CODEX_SESSION_ID_NOTE"), p["CODEX_SESSION_ID_NOTE"])
+        self.assertEqual(env.get("CODEX_SESSION_ID_NOTE"), "near-miss-keep")
+        self.assertEqual(env.get("CODEX_THREAD_ID_NOTE"), "near-miss-keep")
+        self.assertEqual(env.get("CHONGDAE_WAIT"), "near-miss-keep")
+        self.assertEqual(env.get("AGENT_HOST"), host)
+
+    def test_S4_run_claude_drops_codex_session_id(self):
+        for name, p in SESSION_PARENTS.items():
+            with self.subTest(parent=name):
+                self.assertEqual(p.get("CODEX_SESSION_ID"), "parent-codex-session")
+                with mock.patch.dict(os.environ, p, clear=True):
+                    self.assertEqual(os.environ.get("CODEX_SESSION_ID"), "parent-codex-session")
+                    seen, _ = self.call_claude()
+                    self.assertEqual(os.environ.get("CODEX_SESSION_ID"), "parent-codex-session")
+                self.assert_child_env(seen["kw"]["env"], p, "claude-code")
+
+    def test_S4_run_codex_drops_codex_session_id(self):
+        for name, p in SESSION_PARENTS.items():
+            with self.subTest(parent=name):
+                with mock.patch.dict(os.environ, p, clear=True):
+                    seen, _ = self.call_codex()
+                    self.assertEqual(os.environ.get("CODEX_SESSION_ID"), "parent-codex-session")
+                self.assert_child_env(seen["kw"]["env"], p, "codex")
+
+    def test_S4_worker_env_both_hosts_drop_codex_session_id(self):
+        for name, p in SESSION_PARENTS.items():
+            for host, agent in (("claude", "claude-code"), ("codex", "codex")):
+                with self.subTest(parent=name, host=host):
+                    with mock.patch.dict(os.environ, p, clear=True):
+                        env = hostcall.worker_env(host)
+                        self.assertEqual(os.environ.get("CODEX_SESSION_ID"), "parent-codex-session")
+                    self.assert_child_env(env, p, agent)
+
+    def test_S4_session_id_alone_in_bare_parent_is_dropped(self):
+        p = dict(BARE_PARENT, CODEX_SESSION_ID="lonely-session")
+        self.parent(p)
+        seen_claude, _ = self.call_claude()
+        seen_codex, _ = self.call_codex()
+        self.assertNotIn("CODEX_SESSION_ID", seen_claude["kw"]["env"])
+        self.assertNotIn("CODEX_SESSION_ID", seen_codex["kw"]["env"])
+        self.assertEqual(seen_codex["kw"]["env"], dict(BARE_PARENT, AGENT_HOST="codex", AGENT_WORKER="1"))
+        self.assertEqual(dict(os.environ), p)
+
+    def test_S4_empty_session_id_is_still_dropped(self):
+        self.parent(dict(CODEX_PARENT, CODEX_SESSION_ID=""))
+        seen, _ = self.call_claude()
+        self.assertNotIn("CODEX_SESSION_ID", seen["kw"]["env"])
+        self.assertNotIn("CODEX_SESSION_ID", hostcall.worker_env("codex"))
 
 
 class H5NoMutation(Base):

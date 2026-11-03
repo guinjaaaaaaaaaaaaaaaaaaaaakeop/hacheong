@@ -439,10 +439,19 @@ class Result(unittest.TestResult):
         super().__init__()
         self.assertion_failures = 0
         self.fixture_failures = 0
+        self.first_problem = ""
+
+    def problem(self, test, err):
+        if not self.first_problem:
+            self.first_problem = self._exc_info_to_string(err, test).rstrip().splitlines()[-1][:200]
+
+    def addError(self, test, err):
+        self.problem(test, err)
+        super().addError(test, err)
 
     def classify_failure(self, test, err):
         if not isinstance(err[0], type) or not issubclass(err[0], AssertionError):
-            super().addError(test, err)
+            self.addError(test, err)
             return
         method = getattr(test, getattr(test, "_testMethodName", ""), None)
         code = getattr(method, "__code__", None)
@@ -453,6 +462,7 @@ class Result(unittest.TestResult):
                 return
             tb = tb.tb_next
         self.fixture_failures += 1
+        self.problem(test, err)
 
     def addFailure(self, test, err):
         self.classify_failure(test, err)
@@ -461,43 +471,127 @@ class Result(unittest.TestResult):
     def addSubTest(self, test, subtest, err):
         if err is not None and issubclass(err[0], test.failureException):
             self.classify_failure(test, err)
+        elif err is not None:
+            self.problem(subtest, err)
         super().addSubTest(test, subtest, err)
 
 class Runner:
     def run(self, test):
         result = Result()
-        test(result)
+        if len(sys.argv) > 4 and sys.argv[4] == "load":
+            def count(suite):
+                if isinstance(suite, unittest.TestSuite):
+                    return sum(count(t) for t in suite)
+                return 0 if isinstance(suite, unittest.loader._FailedTest) else suite.countTestCases()
+            result.loaded = count(test)
+        else:
+            test(result)
         return result
 
 path, report_path = sys.argv[1], sys.argv[2]
-program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(), exit=False)
-result = program.result
+loader = unittest.TestLoader()
+try:
+    program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(),
+                            testLoader=loader, exit=False)
+    result = program.result
+except Exception:
+    # Some loader failures (notably SyntaxError) escape TestProgram rather than
+    # becoming _FailedTest instances. Record them through unittest as errors too.
+    result = Result()
+    result.addError(unittest.FunctionTestCase(lambda: None), sys.exc_info())
 report = dict(tests_run=result.testsRun, assertion_failures=result.assertion_failures,
               fixture_failures=result.fixture_failures, errors=len(result.errors), skipped=len(result.skipped),
               expected_failures=len(result.expectedFailures), unexpected_successes=len(result.unexpectedSuccesses))
 with open(report_path, "w", encoding="utf-8") as channel:
     json.dump(report, channel)
+if len(sys.argv) > 3:
+    errors = loader.errors
+    extra = dict(first_problem=result.first_problem,
+                 loaded=getattr(result, "loaded", 0),
+                 load_error=errors[0].rstrip().splitlines()[-1][:200] if errors else result.first_problem)
+    with open(sys.argv[3], "w", encoding="utf-8") as channel:
+        json.dump(extra, channel)
 '''
+
+
+def test_context(target, request, before):
+    """Resolve a declaration once; an invalid or changed context never falls back."""
+    default_python = "python3" if shutil.which("python3") else "python"
+    declaration = request.get("test-context")
+    context_path = "hacheong/test-context.json"
+    if declaration is None:
+        after = tree_state(target) if before is not None else None
+        if before is not None and after is not None and before.get(context_path) != after.get(context_path):
+            raise ValueError("test context changed during this call")
+        file = Path(target, context_path)
+        if file.exists():
+            try:
+                declaration = json.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValueError("test context file is not valid JSON: %s" % exc) from exc
+        else:
+            declaration = {}
+    if not isinstance(declaration, dict):
+        raise ValueError("test context must be an object")
+    if set(declaration) - {"cwd", "python"}:
+        raise ValueError("test context has unknown keys")
+    if any(not isinstance(v, str) for v in declaration.values()):
+        raise ValueError("test context cwd and python must be strings")
+    cwd, python = declaration.get("cwd", "."), declaration.get("python", default_python)
+    root = Path(target).resolve()
+    directory = (root / cwd).resolve()
+    if os.path.isabs(cwd) or not directory.is_relative_to(root) or not directory.is_dir():
+        raise ValueError("test context cwd must be an existing directory inside the project: %s" % cwd)
+    if not python or ("/" not in python and any(c.isspace() for c in python)):
+        raise ValueError("test context python must name one executable")
+    executable = str(root / python) if "/" in python else shutil.which(python)
+    if not executable or not os.path.isfile(executable) or not os.access(executable, os.X_OK):
+        raise ValueError("test context python executable not found: %s" % python)
+    return {"cwd": cwd, "python": python, "directory": str(directory), "executable": os.path.abspath(executable)}
 
 
 def unittest_red(target, path):
     """Judge one Python unittest file from structured evidence in a fresh process, without target scratch files."""
     try:
+        return unittest_in_context(target, path, test_context(target, {"test-context": {}}, None))
+    except Exception as exc:
+        return "unverified", "unittest harness could not resolve its default test context: %s" % exc
+
+
+def unittest_in_context(target, path, context=None, load_only=False):
+    """Run or load with the declared cwd and interpreter; extra evidence has its own scratch channel."""
+    try:
         if not path.endswith(".py"):
-            return "unverified", "only Python unittest files are verified automatically"
-        py = "python3" if shutil.which("python3") else "python"
+            return "unverified", "only Python unittest files are verified automatically; a non-test file the tests need belongs in support"
+        context = context or test_context(target, {}, None)
+        cwd = Path(context["directory"])
+        file = Path(target, path).resolve()
+        if not file.is_relative_to(cwd):
+            return "unverified", "outside the test context's cwd: %s" % context["cwd"]
+        relative = str(file.relative_to(cwd))
         scratch_root = Path(tempfile.gettempdir()).resolve()
         target_root = Path(target).resolve()
         if scratch_root == target_root or target_root in scratch_root.parents:
             scratch_root = target_root.parent
         with tempfile.TemporaryDirectory(prefix="hacheong-red-", dir=scratch_root) as scratch:
             report_path = Path(scratch, "report.json")
-            done = subprocess.run([py, "-c", UNITTEST_RED_HARNESS, path, str(report_path)], cwd=target,
-                                  capture_output=True)
+            extra_path = Path(scratch, "extra.json")
+            done = subprocess.run([context["executable"], "-c", UNITTEST_RED_HARNESS, relative,
+                                   str(report_path), str(extra_path), "load" if load_only else "run"],
+                                  cwd=context["directory"], capture_output=True)
             if done.returncode != 0:
                 return "unverified", "unittest harness exited unsuccessfully (%s)" % done.returncode
             report = json.loads(report_path.read_text(encoding="utf-8"))
-        return red_verdict(report)
+            extra = json.loads(extra_path.read_text(encoding="utf-8"))
+        if load_only:
+            if extra["load_error"]:
+                return "unverified", extra["load_error"]
+            return "loaded", extra["loaded"]
+        verdict, detail = red_verdict(report)
+        if verdict == "unverified" and extra["first_problem"]:
+            detail += ' — "%s" (test context cwd=%s, python=%s)' % (
+                extra["first_problem"], context["cwd"], context["python"])
+        return verdict, detail
     except Exception:
         return "unverified", "unittest harness did not return a valid JSON report"
 
@@ -662,6 +756,212 @@ def named_by(stream_text, host, path):
     return any(base in str(c) for c in cmds) or any(str(t).replace("\\", "/").endswith(base) for t in touched if t)
 
 
+def shell_touch(command, path):
+    """Classify a named path conservatively; only a proved reader earns the relaxation."""
+    import shlex
+    text = str(command).strip()
+    wrapper = re.match(r"^(?:/bin/)?(?:ba|z)?sh -l?c (.*)$", text, re.S)
+    try:
+        if wrapper:
+            # unwrapped only when the quoted argument is the whole command; otherwise the full text is classified as written
+            words = shlex.split(wrapper.group(1))
+            if len(words) == 1:
+                text = words[0]
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()\n")
+        lexer.commenters = ""
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except (ValueError, IndexError):
+        return "unclear", text
+    # Separate shell commands, retaining pipelines for the proof of a read.
+    groups, pipeline, argv = [], [], []
+    for tok in tokens + [";"]:
+        if tok == "|":
+            pipeline.append(argv)
+            argv = []
+        elif tok in (";", "&&", "||", "\n", "&") or tok and set(tok) == {"\n"}:
+            pipeline.append(argv)
+            groups.append(pipeline)
+            pipeline, argv = [], []
+        else:
+            argv.append(tok)
+
+    def matches(word):
+        return word == path or word.endswith("/" + path)
+
+    readers = {"cat", "head", "tail", "nl", "wc", "less", "more", "grep", "egrep", "fgrep", "rg",
+               "sed", "ls", "stat", "file", "jq", "diff", "cmp", "echo", "printf"}
+    git_readers = {"show", "diff", "log", "status", "blame", "ls-files"}
+    writes = {">", ">>", ">|", "&>", "&>>", ">&", ">>&", "<>"}
+
+    def reader_effect(args):
+        """Reader switches and scripts need their own proof; a reader name is not enough."""
+        cmd, operands = os.path.basename(args[0]), args[1:]
+        targets, uncertain = [], False
+        if cmd == "sed":
+            scripts = []
+            i = 0
+            while i < len(operands):
+                arg = operands[i]
+                if arg == "--in-place" or arg.startswith("--in-place="):
+                    return "wrote" if any(matches(a) for a in operands) else "unclear"
+                if arg in ("-e", "--expression"):
+                    i += 1
+                    if i < len(operands):
+                        scripts.append(operands[i])
+                    else:
+                        uncertain = True
+                elif arg.startswith("--expression="):
+                    scripts.append(arg.split("=", 1)[1])
+                elif arg.startswith("-") and not arg.startswith("--"):
+                    # e/f consume the rest as an argument, not as option letters.
+                    for j, option in enumerate(arg[1:], 1):
+                        if option in "iI":
+                            return "wrote" if any(matches(a) for a in operands) else "unclear"
+                        if option in "ef":
+                            value = arg[j + 1:]
+                            if not value:
+                                i += 1
+                                value = operands[i] if i < len(operands) else ""
+                            if option == "e" and value:
+                                scripts.append(value)
+                            else:
+                                uncertain = True
+                            break
+                        if option not in "nEr":
+                            uncertain = True
+                elif arg.startswith("-"):
+                    # File scripts and unrecognised options cannot prove a simple read.
+                    if arg not in ("-n", "-E", "-r", "-nE", "-En", "--quiet", "--silent", "--regexp-extended"):
+                        uncertain = True
+                elif not scripts:
+                    scripts.append(arg)
+                i += 1
+            address = r"(?:\d+|\$|/(?:\\.|[^/\\])*/)"
+            for script in scripts:
+                # Accept only simple print/delete and stdout-only substitutions.
+                simple = re.fullmatch(r"(?:" + address + r"(?:," + address + r")?)?[pdq]", script)
+                substitution = re.fullmatch(r"s([^\w\s\\])((?:\\.|(?!\1)[^\\])*)\1((?:\\.|(?!\1)[^\\])*)\1(.*)", script)
+                safe_substitution = substitution and re.fullmatch(r"[gp0-9]*", substitution.group(4))
+                if not simple and not safe_substitution:
+                    uncertain = True
+                    # w/W takes the rest of the script as its output filename.
+                    write = (re.search(r"[wW]\s+(.+)$", substitution.group(4)) if substitution else
+                             re.search(r"(?:^|[;/\d$])\s*[wW]\s+(.+)$", script))
+                    if write:
+                        targets.append(write.group(1).strip())
+            uncertain |= not scripts
+        elif cmd == "rg":
+            uncertain = any(a == "--pre" or a.startswith("--pre=") for a in operands)
+        elif cmd == "git":
+            for i, arg in enumerate(operands):
+                if arg == "--output":
+                    uncertain = True
+                    if i + 1 < len(operands):
+                        targets.append(operands[i + 1])
+                elif arg.startswith("--output="):
+                    uncertain = True
+                    targets.append(arg.split("=", 1)[1])
+            uncertain |= any(a in ("--ext-diff", "--textconv") for a in operands)
+        elif cmd == "less":
+            for i, arg in enumerate(operands):
+                if arg in ("-o", "-O"):
+                    uncertain = True
+                    if i + 1 < len(operands):
+                        targets.append(operands[i + 1])
+                elif arg.startswith(("-o", "-O")):
+                    uncertain = True
+                    targets.append(arg[2:])
+        if any(matches(t) for t in targets):
+            return "wrote"
+        return "unclear" if uncertain else "read"
+
+    for group in groups:
+        for args in group:
+            if not args:
+                continue
+            if any(tok in writes and i + 1 < len(args) and matches(args[i + 1])
+                   for i, tok in enumerate(args)):
+                return "wrote", text
+            cmd = os.path.basename(args[0])
+            operands = args[1:]
+            if reader_effect(args) == "wrote":
+                return "wrote", text
+            writer = cmd in {"tee", "rm", "unlink", "mv", "touch", "truncate", "ln"}
+            writer |= cmd == "cp" and bool(operands) and matches(operands[-1])
+            writer |= cmd == "perl" and any(a.startswith("-i") for a in operands)
+            writer |= cmd == "git" and bool(operands) and operands[0] in {"checkout", "restore", "rm", "mv"}
+            if writer and any(matches(a) for a in operands):
+                return "wrote", text
+    if any(x in text for x in ("$(", "`", "<(", ">(", "<<")):
+        return "unclear", text
+    mentions = []
+    for group in groups:
+        if not any(path in arg for args in group for arg in args):
+            continue
+        only_readers = True
+        whole_word = False
+        for args in group:
+            if not args:
+                only_readers = False
+                continue
+            cmd = os.path.basename(args[0])
+            is_reader = cmd in readers or cmd == "git" and len(args) > 1 and args[1] in git_readers
+            if reader_effect(args) != "read":
+                is_reader = False
+            if not is_reader or any(a in writes or a in ("(", ")") for a in args):
+                only_readers = False
+            for arg in args[1:]:
+                if path in arg:
+                    named = matches(arg) or cmd == "git" and args[1] == "show" and ":" in arg and arg.split(":", 1)[1] == path
+                    whole_word |= named
+                    if not named:
+                        only_readers = False
+        mentions.append(only_readers and whole_word)
+    return ("read" if mentions and all(mentions) else "unclear"), text
+
+
+def transcript_touch(stream_text, host, path):
+    """Strongest mention wins: wrote > unclear > read; preserve every old named_by match."""
+    if not stream_text:
+        return "wrote", ""
+    if not named_by(stream_text, host, path):
+        return "never", ""
+    mentions = []
+    commands, _ = transcript_commands(stream_text, host)
+    for command in commands:
+        if path in str(command):
+            mentions.append(shell_touch(command, path))
+    for line in stream_text.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if host == "codex":
+            item = event.get("item") or {}
+            if event.get("type") == "item.completed" and item.get("type") == "file_change":
+                for change in item.get("changes") or []:
+                    if isinstance(change, dict) and str(change.get("path", "")).replace("\\", "/").endswith(path):
+                        mentions.append(("wrote", "file_change"))
+        elif event.get("type") == "assistant":
+            for item in (event.get("message") or {}).get("content", []):
+                if item.get("type") != "tool_use":
+                    continue
+                inp = item.get("input") or {}
+                name = item.get("name")
+                value = inp.get("file_path") or inp.get("path") or inp.get("pattern") or ""
+                if not str(value).replace("\\", "/").endswith(path):
+                    continue
+                if name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+                    mentions.append(("wrote", name))
+                elif name in ("Read", "Grep", "Glob"):
+                    mentions.append(("read", name))
+    return max(mentions or [("unclear", "")], key=lambda x: {"read": 0, "unclear": 1, "wrote": 2}[x[0]])
+
+
 def shell_tokens(command):
     """A command as its argv: the host's `/bin/zsh -lc "..."` wrapper unwrapped, quoting resolved. Unparseable text stays whole."""
     import shlex
@@ -750,6 +1050,10 @@ def validate(out, member, request, target, stream_text, host, before, protected_
             # the request amends tests the build disputed (`amending`): the build already stands, and the corrected tests may pass
             if request.get("amending"):
                 continue
+            tests = out.get("tests", [])
+            if not isinstance(tests, list):
+                problems.append("red-before-build: tests must be an array")
+                continue
             # code already changed and uncommitted when the call began — an earlier build attempt left in the tree — can make a
             # correct new test pass before this slice's build; that is not the test deciding nothing (guin-site s2-tests-nobind)
             built_before = sorted(p for p in (before or {}) if p.endswith(CODE_EXT) and not p.startswith(("tests/", "test/"))
@@ -757,7 +1061,36 @@ def validate(out, member, request, target, stream_text, host, before, protected_
             # a declared test its writer deleted, or one the request names in `deleted-tests`, is the contract's own change: said, skipped
             # (guin-site Q-cleanup: four retired test files refused a finished tests task four times as "does not exist")
             retired = set(path_list(request.get("deleted-tests")))
-            for t in out.get("tests") or []:
+            support = out.get("support")
+            if support is None:
+                support = []
+            if not isinstance(support, list) or any(not isinstance(t, str) for t in support):
+                problems.append("red-before-build: support must be an array of strings")
+                support = []
+            unsafe = set()
+            for t in support:
+                try:
+                    safe = (bool(t) and not os.path.isabs(t) and ".." not in t.split("/")
+                            and "\\" not in t and "\0" not in t
+                            and Path(target, t).resolve().is_relative_to(Path(target).resolve()))
+                except (OSError, ValueError, RuntimeError):
+                    safe = False
+                if not safe:
+                    problems.append("red-before-build: support %r is not a safe project-relative path" % t)
+                    unsafe.add(t)
+                if t not in tests:
+                    problems.append("red-before-build: support %s is not in tests" % t)
+            protected_support = []
+            if tests and all(t in support for t in tests):
+                problems.append("red-before-build: no runnable test — every entry is support")
+            context, context_error = None, None
+            try:
+                context = test_context(target, request, before)
+            except (ValueError, OSError) as exc:
+                context_error = str(exc)
+            for t in dict.fromkeys(tests + support):
+                if t in unsafe:
+                    continue
                 p = os.path.join(target, t)
                 if t in retired and not os.path.exists(p):
                     continue
@@ -767,7 +1100,25 @@ def validate(out, member, request, target, stream_text, host, before, protected_
                 if not os.path.exists(p):
                     problems.append("red-before-build: %s does not exist" % t)
                     continue
-                verdict, detail = unittest_red(target, t)
+                if t in support:
+                    if not os.path.isfile(p):
+                        problems.append("red-before-build: support %s must be a regular file (list the files themselves)" % t)
+                        continue
+                    if t in tests:
+                        protected_support.append(t)
+                    if re.fullmatch(r"test.*\.py", os.path.basename(t)):
+                        problems.append("red-before-build: %s is declared support — a test*.py file is a test module" % t)
+                    elif t.endswith(".py"):
+                        verdict, detail = (("unverified", context_error) if context_error else
+                                           unittest_in_context(target, t, context, load_only=True))
+                        if verdict == "loaded" and detail:
+                            problems.append("red-before-build: %s is declared support — it holds %s tests" % (t, detail))
+                        elif verdict == "unverified":
+                            out.setdefault("non-claims", []).append(
+                                "%s could not be loaded to confirm it holds no tests: %s" % (t, detail))
+                    continue
+                verdict, detail = (("unverified", context_error) if context_error else
+                                   unittest_in_context(target, t, context))
                 if verdict == "unverified":
                     problems.append("red-before-build: %s is not verified red — %s" % (t, detail))
                 elif verdict == "green" and built_before:
@@ -776,6 +1127,9 @@ def validate(out, member, request, target, stream_text, host, before, protected_
                                                             % (t, ", ".join(built_before[:6])))
                 elif verdict == "green":
                     problems.append("red-before-build: %s passes before the build — it decides nothing" % t)
+            if protected_support:
+                out.setdefault("non-claims", []).append(
+                    "support (protected with the tests, not red evidence): " + ", ".join(protected_support))
         elif name == "only-tests-touched":
             after = tree_state(target)
             if before is not None and after is not None:
@@ -784,8 +1138,19 @@ def validate(out, member, request, target, stream_text, host, before, protected_
                 stray = [c for c in changed if c not in allowed and not c.startswith(("tests/", "test/"))]
                 # judged by what this member did, not by what the tree did: a file its transcript never names was changed by another
                 # hand during the call (the session writing code beside a tests worker, guin-site s4-tests). No transcript: strict.
-                others = [c for c in stray if stream_text and not named_by(stream_text, host, c)]
-                mine = [c for c in stray if c not in others]
+                evidence = {c: transcript_touch(stream_text, host, c) for c in stray}
+                others = [c for c in stray if evidence[c][0] == "never"]
+                mine = [c for c in stray if evidence[c][0] == "wrote"]
+                unclear = [c for c in stray if evidence[c][0] == "unclear"]
+                read = [c for c in stray if evidence[c][0] == "read"]
+                if unclear:
+                    problems.append("only-tests-touched: %s were named only in commands that could have written them "
+                                    "(a read could not be told from a write): %s" %
+                                    (", ".join(unclear[:8]), repr(evidence[unclear[0]][1][:120])))
+                if read:
+                    out.setdefault("non-claims", []).append(
+                        "only read evidence observed in this member's transcript; write ownership was not established: "
+                        + ", ".join(read[:8]))
                 if mine:
                     problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(mine[:8]))
                 if others:

@@ -84,8 +84,7 @@ session's actual tools or capabilities.
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
 the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
-the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every file in `tests` is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter, it ran at least one test and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` nothing
-changed outside `tests` · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every runnable file (`tests` minus `support`) is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter using the test context's `cwd` and `python` (request `test-context`, else project `hacheong/test-context.json`; omitted keys default to the project root and `python3`, else `python`), it ran at least one test and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` classifies mentions of changes outside `tests`, `tests/` or `test/`: wrote fails, unclear fails with a command quote, proved reads are not held against the member · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
 uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
 
@@ -111,10 +110,14 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `--max-turns` and `HACHEONG_CONTINUATIONS` bound Claude calls only. The Codex adapter passes no turn or wall-clock
   limit to `codex exec`; its call ends when the host exits.
-- `red-before-build` verifies Python `unittest` files only, each run by `python3` (falling back to `python`) through a
+- `red-before-build` verifies runnable Python `unittest` files only, in the declared test context through a
   harness that reports unittest's own result in a scratch file outside the project. A direct script, a pytest-style
   module, a JavaScript test or any other non-`.py` file is `not verified red` and fails the answer; no other runner is
-  chosen from a file's extension. Such red is for the runner that hired the member to verify itself. A missing feature
+  chosen from a file's extension or directory. Support belongs in `support` and `tests`: it stays protected but is not red evidence.
+  `support` must be an array of safe project-relative paths to regular files, each also in `tests`; list the files themselves, not directories. Absent or null means `[]`.
+  A `test*.py` support file or one loading unittest tests fails; an unloadable helper is a non-claim. At least one
+  runnable file is needed. An invalid context, a project context changed during the call, or a file outside its cwd is
+  not verified red; unittest errors quote their last traceback line and the context. Such red is for the runner that hired the member to verify itself. A missing feature
   has to show as a failed assertion — an `AssertionError` (or a subclass) raised in a test body: a test that imports a
   module not yet written errors, an error is not red, and a TestCase that widens `failureException` beyond
   `AssertionError` does not turn another exception into one (that failure counts as an error). The
@@ -190,9 +193,14 @@ the validator set. A member may not change these; when they must change, this pl
   shows the adapter in real CLI environments — not an installed plugin, project hooks, a release or its adoption.
 
 - **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
-  transcript names (a command it ran, a file it read, edited or wrote); a file changed during the call that the
-  transcript never names was another hand's — the session writing code beside a tests worker — and is said as a
-  non-claim, not held against it. No transcript: strict, as before. `red-before-build` cannot decide a test that passes
+  transcript shows it wrote, or names in commands where a read cannot be told from a write (said with a command quote).
+  A write wins over an unclear mention, which wins over a read. A reader with a switch or script part that can write or
+  execute — sed in place in any spelling, `sed -f`/`e`/`w`, `rg --pre`, `git … --output`, `less -o` — is never a read. A
+  file named only in proved simple reads is a non-claim: only read evidence was observed, and write ownership was not
+  established. A file the transcript never names is presumed another hand's (the session writing code beside a tests
+  worker) and is said as 2.0.1's non-claim, not held against the member. Both are transcript evidence, not a guarantee
+  about who wrote a file: a member's write its transcript does not name (a script that computes the path) is not seen.
+  No transcript: strict, as before. `red-before-build` cannot decide a test that passes
   when code was already changed and uncommitted before the call began (an earlier build attempt): it says so instead of
   failing the answer.
 - **A contract that retires a feature retires its tests.** The tests writer deletes them, and a declared test it deleted
@@ -242,6 +250,6 @@ real one is `done`, each validator fires on a recorded case, project-local membe
 `new` scaffolds something `check` refuses until it is written, a sandbox's refusal recorded in a codex or Claude Code
 stream is said as `lacked` (and a local failure, or a host that can, is not). No model calls.
 
-`python3 -m unittest test_native_prompt.py test_hostcall_env.py test_record_paths.py test_red_gate.py` — the
-`--prompt-only` environment, a child host's identity, the record-path rule and the red-before-build gate.
+`python3 -m unittest test_native_prompt.py test_hostcall_env.py test_record_paths.py test_red_gate.py test_tests_writer.py` — the
+`--prompt-only` environment, a child host's identity, the record-path rule, the red-before-build gate and the tests writer’s context, support and transcript gates.
 `test_hacheong.py` does not run these suites; the self-check is both commands. No model calls.

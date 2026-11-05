@@ -1,0 +1,1282 @@
+"""hacheong's one runner: a member (a disposition), a domain (what the artifact is), a request — one fresh host session, one answer.
+
+  python worker.py --member NAME|DIR --request FILE --response FILE [--host claude|codex] [--model M] [--effort E] [--max-turns N]
+  python worker.py --member NAME --request FILE --response FILE --prompt-only      # print the prompt; a session dispatches its own subagent
+
+A member is a directory, not code: `ROLE.md` (the disposition, as sentences), `answer.json` (the answer's schema), `policy.json`
+(tools, sandbox, which of this runner's validators apply). A domain is `domains/<name>/DOMAIN.md`: what "build", "quibble",
+"nitpick", "newbie" mean for that kind of artifact and what counts as evidence there. The prompt is ROLE ⊕ DOMAIN ⊕ request.
+A name resolves to `members/<name>` here, a project's `hacheong/members/<name>` first; a path with a slash is used as is.
+
+The answer always carries the envelope every runner reads — `status` (done|blocked|failed), `summary`, `non-claims` — plus
+the member's own fields, plus `worker` (host, model, turns, cost, session, transcript; `continued` when a claude session ran
+out of turns and the call went on in another, told to continue from the tree). What a model cannot be asked to
+refrain from is enforced here after the fact by named validators (a quote for every finding, a tree it was not allowed to
+change, a check it claims to have run, a test that must be red before the build, a README-only reader): a validator that
+fails turns the answer into `status: failed` with the reason in `non-claims`. Nothing short of a validated answer is done.
+A command whose output shows the sandbox refusing what this member lacks on this host (a local port, the network) adds
+`lacked` and a non-claim starting `sandbox lacked: ` — a hiring question, not the member's decision.
+"""
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hostcall import run_claude, run_codex, claude_answer, worker_record  # noqa: E402  (vendored: the same file in each plugin of this family)
+
+HERE = Path(__file__).resolve().parent
+POLICY_KEYS = {"tools", "sandbox", "validate", "max-turns", "can"}
+# What a session this call starts can reach, by host, unless the member's policy says otherwise (`can`). A Codex sandbox has no
+# network and cannot bind a local port — guin-site, 2026-09-30: "로컬 TCP bind 권한 부족", "Wrangler가 … 127.0.0.1 포트를 차단":
+# five attempts blocked mid-task before the session did the builds itself. A Claude Code worker runs as the host does.
+CAPABILITIES = ("network", "loopback")
+HOST_CAN = {"codex": {"network": False, "loopback": False}, "claude": {"network": True, "loopback": True}}
+# `lacked` is the member's own word for what this place lacked (empty: nothing). Optional in meaning — an empty list is said
+# as no `lacked` at all — but listed in `required`: Codex's output schema is strict, and a property it does not require fails
+ENVELOPE = {"status": {"enum": ["done", "blocked", "failed"]}, "summary": {"type": "string"}, "non-claims": {"type": "array", "items": {"type": "string"}},
+            "lacked": {"type": "array", "items": {"enum": list(CAPABILITIES)}}}
+
+
+def capabilities(member, host):
+    """{capability: bool} for this member on this host: the host's default, overridden by the policy's `can`."""
+    can = dict(HOST_CAN.get(host, {c: False for c in CAPABILITIES}))
+    can.update({k: bool(v) for k, v in (member["policy"].get("can") or {}).items()})
+    return can
+
+
+def missing_needs(request, member, host):
+    """The request's `needs` this member cannot meet here — an unknown need counts as unmet (fail closed)."""
+    can = capabilities(member, host)
+    return [n for n in (request.get("needs") or []) if not can.get(n)]
+VALIDATORS = ("quotes-required", "no-tree-changes", "checks-ran", "red-before-build", "readme-only", "only-tests-touched", "tests-kept", "explanation-kept")
+
+
+def record_paths(target):
+    """The products' records and the environment, not the project: what `record-paths` in hunsu.lock.json declares (each plugin's
+    `records`), else the siblings' names as they were before the lock carried them. Always the run's own transcripts' home
+    and the five environment files. A trailing slash declares a directory; every other entry is an exact file path."""
+    lock = {}
+    try:
+        lock = json.loads(Path(target, "hunsu.lock.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    declared = lock.get("record-paths") if isinstance(lock, dict) else None
+    others = sorted({p for ps in declared.values() for p in ps}) if isinstance(declared, dict) else [".chongdae/", ".mangsang/", ".dwitbuk/", "reviews/"]
+    return tuple(sorted(set(others) | {".chongdae/", "hunsu.json", "hunsu.lock.json", "hunsu-judgments.json",
+                                      "hunsu-conflicts.md", "hunsu.local.json"}))
+
+
+def is_record(path, records):
+    """A project-root-relative path matches an exact file or lies under a declared directory at that root."""
+    return any((path == p[:-1] or path.startswith(p)) if p.endswith("/") else path == p for p in records)
+
+
+def py_inventory(text):
+    """What a Python file says besides what it does: its public def/class names, how many docstrings, how many comment
+    lines. A refactoring may move all of these; it may not lose any. Text that will not parse counts as nothing (a broken
+    file fails its checks anyway)."""
+    import ast, io as _io, tokenize
+    names, docs = set(), 0
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return names, docs, 0
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not node.name.startswith("_"):
+                names.add(node.name)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and ast.get_docstring(node):
+            docs += 1
+    comments = 0
+    try:
+        for t in tokenize.generate_tokens(_io.StringIO(text).readline):
+            if t.type == tokenize.COMMENT:
+                comments += 1
+    except (tokenize.TokenError, IndentationError):
+        pass
+    return names, docs, comments
+
+
+def inventory(target, at_head):
+    """The project's Python inventory as one triple (names, docstrings, comment lines), summed over its .py files — at HEAD
+    (from git) or in the working tree. Tests and records are left out: tests are the contract's, records are not the program."""
+    skip = (".git/", "__pycache__/", ".venv/", "tests/", "test/")
+    records = record_paths(target)
+    files = {}
+    if at_head:
+        done = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        for p in done.stdout.split("\n"):
+            p = p.strip()
+            if p.endswith(".py") and not p.startswith(skip) and not any("/" + s in "/" + p for s in skip) and not is_record(p, records):
+                shown = subprocess.run(["git", "show", "HEAD:" + p], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if shown.returncode == 0:
+                    files[p] = shown.stdout
+    else:
+        for root, dirs, names in os.walk(target):
+            rel = os.path.relpath(root, target).replace(os.sep, "/")
+            rel = "" if rel == "." else rel + "/"
+            dirs[:] = [d for d in dirs if d + "/" not in skip and not is_record(rel + d + "/", records)]
+            for n in names:
+                if n.endswith(".py") and not is_record(rel + n, records):
+                    try:
+                        files[rel + n] = open(os.path.join(root, n), encoding="utf-8", errors="replace").read()
+                    except OSError:
+                        pass
+    names, docs, comments = set(), 0, 0
+    for text in files.values():
+        n, d, c = py_inventory(text)
+        names |= n; docs += d; comments += c
+    return names, docs, comments
+
+
+# ---------------------------------------------------------------- members and domains (directories, not code)
+
+def member_dir(name, target=None):
+    """`members/<name>` — a project's own `hacheong/members/<name>` wins; a path with a slash is taken as is."""
+    if "/" in name or os.sep in name:
+        p = Path(name)
+        p = p if p.is_absolute() else Path(target or ".") / p
+        if not p.is_dir():
+            raise SystemExit("no member directory %s" % name)
+        return p
+    for base in ([Path(target) / "hacheong" / "members"] if target else []) + [HERE / "members"]:
+        if (base / name).is_dir():
+            return base / name
+    raise SystemExit("no member %r — members here: %s" % (name, ", ".join(sorted(p.name for p in (HERE / "members").iterdir() if p.is_dir())) or "none"))
+
+
+def load_member(name, target=None):
+    d = member_dir(name, target)
+    role = (d / "ROLE.md").read_text(encoding="utf-8") if (d / "ROLE.md").exists() else None
+    if not role or not role.strip():
+        raise SystemExit("member %s has no ROLE.md" % d.name)
+    try:
+        schema = json.loads((d / "answer.json").read_text(encoding="utf-8"))
+        policy = json.loads((d / "policy.json").read_text(encoding="utf-8")) if (d / "policy.json").exists() else {}
+    except (OSError, ValueError) as err:
+        raise SystemExit("member %s: %s" % (d.name, err))
+    bad_can = sorted(set(policy.get("can") or {}) - set(CAPABILITIES))
+    if bad_can:
+        raise SystemExit("member %s: policy.json `can` has unknown capabilities %s (known: %s)" % (d.name, bad_can, ", ".join(CAPABILITIES)))
+    unknown = set(policy) - POLICY_KEYS
+    if unknown:
+        raise SystemExit("member %s: policy.json has unknown keys %s (known: %s)" % (d.name, sorted(unknown), sorted(POLICY_KEYS)))
+    bad = [v for v in policy.get("validate", []) if v.split(":")[0] not in VALIDATORS]
+    if bad:
+        raise SystemExit("member %s: unknown validators %s (this runner has: %s)" % (d.name, bad, ", ".join(VALIDATORS)))
+    # the envelope is not the member's to drop: every runner reads status/summary/non-claims
+    props = schema.setdefault("properties", {})
+    for k, v in ENVELOPE.items():
+        props.setdefault(k, v)
+    req = schema.setdefault("required", [])
+    for k in ENVELOPE:
+        if k not in req:
+            req.append(k)
+    schema.setdefault("type", "object")
+    schema.setdefault("additionalProperties", False)
+    return {"name": d.name, "dir": d, "role": role.strip(), "schema": schema, "policy": policy}
+
+
+def domain_for(request, override=None):
+    """Which domain the request is about. Said outright (`domain`), else read off the artifact: checks or a build/verify
+    stage → code; a `produces` type names its family (plan/…, design/…); else code."""
+    if override:
+        return override
+    if request.get("domain"):
+        return request["domain"]
+    produces = str(request.get("produces") or "")
+    if produces and "/" in produces:
+        fam = produces.split("/")[0]
+        if fam not in ("chongdae",):
+            return fam
+    return "code"
+
+
+def domain_text(domain, member, target=None):
+    """DOMAIN.md's common part (before the first `## `) plus the `## <member>` section, if any. A project's
+    `hacheong/domains/<domain>/DOMAIN.md` wins over this plugin's. No file: the member works from its ROLE alone and says so."""
+    for base in ([Path(target) / "hacheong" / "domains"] if target else []) + [HERE / "domains"]:
+        p = base / domain / "DOMAIN.md"
+        if p.exists():
+            text = p.read_text(encoding="utf-8")
+            parts = re.split(r"^## +", text, flags=re.M)
+            common = parts[0].strip()
+            mine = next((s for s in parts[1:] if s.split("\n", 1)[0].strip() == member), None)
+            return (common + ("\n\n## " + mine.strip() if mine else "")).strip(), str(p)
+    return None, None
+
+
+def environment_text(member, host, native=False):
+    """What the session this call starts can and cannot reach, or the parent's authority for a native call:
+    a worker that learns mid-task that the network
+    is gone improvises around it (a lock file written by hand, the old tool wrapped in the new one) instead of saying so."""
+    lines = ["# Where you run", ""]
+    if native:
+        lines.append("You are a subagent the parent session dispatched itself (a native call); this prompt was printed by "
+                     "`worker.py --prompt-only`, which grants nothing. What you may read, write and run, your tools, and whether "
+                     "you have the network or loopback (binding a local port) come from the parent host and its configuration, "
+                     "not from this text. This runner starts no subprocess for you — none of its sandboxes applies — and runs "
+                     "none of its validators on your answer.")
+    elif host == "codex":
+        sandbox = os.environ.get("AGENT_CODEX_SANDBOX") or member["policy"].get("sandbox") or "read-only"
+        if sandbox == "workspace-write":
+            lines.append("A Codex sandbox (`workspace-write`): you can write inside `target`. By default it has no network — package "
+                         "installs and downloads fail — and `.git` is read-only: no commit, no `git mv`, no branch.")
+        elif sandbox == "read-only":
+            lines.append("A Codex sandbox (`read-only`): you can read and run commands, not write, and there is no network.")
+        else:
+            lines.append("A Codex sandbox (`%s`)." % sandbox)
+    else:
+        lines.append("A Claude Code session with these tools only: %s." % (member["policy"].get("tools") or "Read,Grep,Glob"))
+    if not native:
+        can = capabilities(member, "codex" if host == "codex" else "claude")
+        lines.append("Network: %s. Loopback — binding a local port (a local server, `wrangler dev`, a fake S3 on 127.0.0.1): %s."
+                     % ("yes" if can["network"] else "no", "yes" if can["loopback"] else "no"))
+    lines.append("What the work needs and this place lacks — a package, a tool, the network, a file outside `target` — is not "
+                 "yours to work around: stop with `status: blocked` and name it. When it is the network or loopback, list it in "
+                 "`lacked` (`[\"loopback\"]`, `[\"network\"]`), not only in prose — the runner reads `lacked`, not your sentences; "
+                 "nothing lacked: `lacked: []`. Do not write by hand what a tool generates "
+                 "(a lock file, a build output) and do not swap in another tool for the one the request names.")
+    return "\n".join(lines)
+
+
+def assemble(member, request, domain, target=None, host=None, native=False):
+    dtext, dpath = domain_text(domain, member["name"], target)
+    parts = ["# Who you are\n\n" + member["role"]]
+    if dtext:
+        parts.append("# The domain: %s\n\n%s" % (domain, dtext))
+    else:
+        parts.append("# The domain: %s\n\nNo domain text is available for %r. Work from your role alone and say so in `non-claims`." % (domain, domain))
+    parts.append(environment_text(member, host, native=native))
+    parts.append("# Request\n\nWork only inside `target`. Do not write the response file; answer with the JSON object.\n\n" + json.dumps(request, ensure_ascii=False, indent=2))
+    return "\n\n".join(parts), dpath
+
+
+# ---------------------------------------------------------------- host adapters (the same on every member)
+
+def continuations(value):
+    """HACHEONG_CONTINUATIONS as a count: sessions after one that ran out of turns, before a stop is reported (2 when unset
+    or not a number; never below 0 — the first session always runs)."""
+    try:
+        return max(0, int(str(value).strip()))
+    except ValueError:
+        return 2
+
+
+CONTINUATIONS = continuations(os.environ.get("HACHEONG_CONTINUATIONS", 2))
+
+def failed(summary, why, schema=None):
+    return {"status": "failed", "summary": summary, "non-claims": [why]}
+
+
+def parse_claude(returncode, stdout, stderr):
+    """The host's stream-json -> the answer. Anything short of a well-formed answer is `failed`, never `done`."""
+    out, why = claude_answer(stdout)
+    if returncode or out is None:
+        if why == "no structured answer":
+            return failed("no structured answer", "answer was not the required JSON")
+        return failed("host exited %d: %s" % (returncode, (why or "").replace("claude error: ", "") or stderr[-400:]),
+                      "the host session did not finish; nothing it did is verified")
+    if not isinstance(out, dict) or out.get("status") not in ("done", "blocked", "failed"):
+        return failed("answer has no valid status", "answer did not match the schema")
+    for key, default in (("non-claims", []), ("summary", "")):
+        out.setdefault(key, default)
+    return out
+
+
+def results(stdout):
+    """The `result` events of a claude stream, in order — one per session in it."""
+    found = []
+    for line in (stdout or "").split("\n"):
+        try:
+            event = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            found.append(event)
+    return found
+
+
+def continuation(prompt, max_turns, n):
+    return prompt + ("\n\n# Continuing (session %d)\n\nAn earlier session on this same request used all its %d turns before it answered. "
+                     "Whatever it changed is in the tree now (`git status`, `git diff` show it); nothing else of it reaches you. "
+                     "Continue from there — do not redo what is done, do not undo it unless it is wrong — and answer as the request asks." % (n + 1, max_turns))
+
+
+def claude(prompt, member, args, target):
+    """One host session; when it stops at the turn ceiling (`error_max_turns`), up to CONTINUATIONS more, each told to continue
+    from the tree — what a session did by hand every time a claude-host worker ran out of turns (guin-site: six times in one
+    cycle, each `retry … "트리에서 이어"`, each finishing). The streams are kept as one: the validators read every command any of
+    them ran, and the answer is the last session's."""
+    tools = member["policy"].get("tools", "Read,Grep,Glob")
+    streams, ask = [], prompt
+    for n in range(1 + CONTINUATIONS):
+        code, stdout, stderr = run_claude(ask, member["schema"], cwd=target, add_dirs=[target], tools=tools, model=args.model, effort=args.effort, max_turns=args.max_turns, bypass=True)
+        streams.append(stdout if stdout.endswith("\n") or not stdout else stdout + "\n")
+        last = (results(stdout) or [{}])[-1]
+        if last.get("subtype") != "error_max_turns":
+            break
+        ask = continuation(prompt, args.max_turns, n + 1)
+    stream = "".join(streams)
+    out = parse_claude(code, stdout, stderr)
+    out["worker"] = worker_record(stream, args.response, "claude-code", args.model)
+    if len(streams) > 1:   # the record is the whole call: every session's turns and cost, and how many continued
+        done = results(stream)
+        out["worker"]["turns"] = sum(r.get("num_turns") or 0 for r in done)
+        out["worker"]["cost_usd"] = sum(r.get("total_cost_usd") or 0 for r in done) if any(r.get("total_cost_usd") is not None for r in done) else None
+        out["worker"]["continued"] = len(streams) - 1
+    return out, stream
+
+
+def codex(prompt, member, args, target):
+    sandbox = member["policy"].get("sandbox") or "read-only"   # AGENT_CODEX_SANDBOX in the env overrides it, in run_codex
+    code, stdout, stderr, last = run_codex(prompt, member["schema"], target, sandbox=sandbox, model=args.model, effort=args.effort)
+    try:
+        out = json.loads((last or "").strip())
+        if not isinstance(out, dict) or out.get("status") not in ("done", "blocked", "failed"):
+            out = failed("answer has no valid status", "answer did not match the schema")
+    except (OSError, ValueError):
+        out = failed("codex exited %d without a JSON answer" % code, "the host session did not finish; nothing it did is verified")
+    out["worker"] = worker_record(stdout, args.response, "codex", args.model, stderr)
+    return out, stdout
+
+
+# ---------------------------------------------------------------- validators: what the model cannot be asked to refrain from
+
+def tree_state(target):
+    """Every tracked-or-untracked file's hash, from git; None when the target is not a repository."""
+    done = subprocess.run(["git", "status", "--porcelain", "-z", "--untracked-files=all"], cwd=target, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape")
+    if done.returncode:
+        return None
+    # -z: names unquoted (a Korean name is itself, not an octal escape), and a rename gives both sides — the old path is a change too
+    paths, parts, i = [], done.stdout.split("\0"), 0
+    while i < len(parts):
+        entry = parts[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" or entry[1] in "RC":
+            if i < len(parts) and parts[i]:
+                paths.append(parts[i])
+            i += 1
+    state = {}
+    records = record_paths(target)
+    for path in paths:
+        if "__pycache__" in path or path.endswith((".pyc", ".DS_Store")):   # what interpreters and the OS leave behind is not a change
+            continue
+        if is_record(path, records):   # records are exact files or directories anchored at the project root
+            continue
+        full = os.path.join(target, path)
+        state[path] = hashlib.sha1(open(full, "rb").read()).hexdigest() if os.path.isfile(full) else "gone"
+    return state
+
+
+def path_list(value):
+    """A request's path list; a bare string is one path."""
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def protected_tests(target, request):
+    """The requested tests' actual contents, independent of git status, ignores or HEAD."""
+    result = {}
+    for path in path_list(request.get("tests")):
+        full = Path(target) / path
+        try:
+            result[path] = hashlib.sha256(full.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            result[path] = None
+    return result
+
+
+def deleted_by_writer(target, path, before):
+    """A declared test that is absent now but was in the tree when the call began — a file there then (`before` has its hash),
+    or one tracked at HEAD (unchanged, so `before` does not list it; or already `gone`, deleted by an earlier attempt of the
+    same task). Its writer deleted it: a contract that retires a feature retires its tests. A path never in the tree is not."""
+    if os.path.lexists(os.path.join(target, path)):
+        return False
+    if (before or {}).get(path) is not None:
+        return True
+    done = subprocess.run(["git", "cat-file", "-e", "HEAD:" + path], cwd=target, capture_output=True)
+    return done.returncode == 0
+
+
+RED_REPORT_KEYS = ("tests_run", "assertion_failures", "fixture_failures", "errors", "skipped", "expected_failures", "unexpected_successes")
+
+
+def red_verdict(report):
+    """Only an assertion failure in a test body, with no errors or fixture failures, proves red."""
+    if (not isinstance(report, dict) or set(report) != set(RED_REPORT_KEYS)
+            or any(type(report[k]) is not int or report[k] < 0 for k in RED_REPORT_KEYS)):
+        return "unverified", "unittest returned an invalid report"
+    if report["errors"]:
+        return "unverified", "unittest recorded errors"
+    if report["fixture_failures"]:
+        return "unverified", "an assertion failed outside a test body"
+    if not report["tests_run"]:
+        return "unverified", "no tests ran: only unittest TestCase tests are verified"
+    if report["assertion_failures"]:
+        return "red", "unittest recorded an assertion failure inside a test body"
+    return "green", "unittest recorded no assertion failures inside test bodies"
+
+
+# Run in the target's interpreter: TestProgram supplies the same file loading as `python -m unittest`.
+# The scratch file carries only the report, independently of anything tests print to stdout or stderr.
+UNITTEST_RED_HARNESS = r'''
+import json
+import os
+import sys
+import unittest
+
+class Result(unittest.TestResult):
+    def __init__(self):
+        super().__init__()
+        self.assertion_failures = 0
+        self.fixture_failures = 0
+        self.first_problem = ""
+
+    def problem(self, test, err):
+        if not self.first_problem:
+            self.first_problem = self._exc_info_to_string(err, test).rstrip().splitlines()[-1][:200]
+
+    def addError(self, test, err):
+        self.problem(test, err)
+        super().addError(test, err)
+
+    def classify_failure(self, test, err):
+        if not isinstance(err[0], type) or not issubclass(err[0], AssertionError):
+            self.addError(test, err)
+            return
+        method = getattr(test, getattr(test, "_testMethodName", ""), None)
+        code = getattr(method, "__code__", None)
+        tb = err[2]
+        while tb is not None:
+            if code is not None and tb.tb_frame.f_code is code:
+                self.assertion_failures += 1
+                return
+            tb = tb.tb_next
+        self.fixture_failures += 1
+        self.problem(test, err)
+
+    def addFailure(self, test, err):
+        self.classify_failure(test, err)
+        super().addFailure(test, err)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None and issubclass(err[0], test.failureException):
+            self.classify_failure(test, err)
+        elif err is not None:
+            self.problem(subtest, err)
+        super().addSubTest(test, subtest, err)
+
+class Runner:
+    def run(self, test):
+        result = Result()
+        if len(sys.argv) > 4 and sys.argv[4] == "load":
+            def count(suite):
+                if isinstance(suite, unittest.TestSuite):
+                    return sum(count(t) for t in suite)
+                return 0 if isinstance(suite, unittest.loader._FailedTest) else suite.countTestCases()
+            result.loaded = count(test)
+        else:
+            test(result)
+        return result
+
+path, report_path = sys.argv[1], sys.argv[2]
+loader = unittest.TestLoader()
+try:
+    program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(),
+                            testLoader=loader, exit=False)
+    result = program.result
+except Exception:
+    # Some loader failures (notably SyntaxError) escape TestProgram rather than
+    # becoming _FailedTest instances. Record them through unittest as errors too.
+    result = Result()
+    result.addError(unittest.FunctionTestCase(lambda: None), sys.exc_info())
+report = dict(tests_run=result.testsRun, assertion_failures=result.assertion_failures,
+              fixture_failures=result.fixture_failures, errors=len(result.errors), skipped=len(result.skipped),
+              expected_failures=len(result.expectedFailures), unexpected_successes=len(result.unexpectedSuccesses))
+with open(report_path, "w", encoding="utf-8") as channel:
+    json.dump(report, channel)
+if len(sys.argv) > 3:
+    errors = loader.errors
+    extra = dict(first_problem=result.first_problem,
+                 loaded=getattr(result, "loaded", 0),
+                 load_error=errors[0].rstrip().splitlines()[-1][:200] if errors else result.first_problem)
+    with open(sys.argv[3], "w", encoding="utf-8") as channel:
+        json.dump(extra, channel)
+'''
+
+
+def test_context(target, request, before):
+    """Resolve a declaration once; an invalid or changed context never falls back."""
+    default_python = "python3" if shutil.which("python3") else "python"
+    declaration = request.get("test-context")
+    context_path = "hacheong/test-context.json"
+    if declaration is None:
+        after = tree_state(target) if before is not None else None
+        if before is not None and after is not None and before.get(context_path) != after.get(context_path):
+            raise ValueError("test context changed during this call")
+        file = Path(target, context_path)
+        if file.exists():
+            try:
+                declaration = json.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValueError("test context file is not valid JSON: %s" % exc) from exc
+        else:
+            declaration = {}
+    if not isinstance(declaration, dict):
+        raise ValueError("test context must be an object")
+    if set(declaration) - {"cwd", "python"}:
+        raise ValueError("test context has unknown keys")
+    if any(not isinstance(v, str) for v in declaration.values()):
+        raise ValueError("test context cwd and python must be strings")
+    cwd, python = declaration.get("cwd", "."), declaration.get("python", default_python)
+    root = Path(target).resolve()
+    directory = (root / cwd).resolve()
+    if os.path.isabs(cwd) or not directory.is_relative_to(root) or not directory.is_dir():
+        raise ValueError("test context cwd must be an existing directory inside the project: %s" % cwd)
+    if not python or ("/" not in python and any(c.isspace() for c in python)):
+        raise ValueError("test context python must name one executable")
+    executable = str(root / python) if "/" in python else shutil.which(python)
+    if not executable or not os.path.isfile(executable) or not os.access(executable, os.X_OK):
+        raise ValueError("test context python executable not found: %s" % python)
+    return {"cwd": cwd, "python": python, "directory": str(directory), "executable": os.path.abspath(executable)}
+
+
+def unittest_red(target, path):
+    """Judge one Python unittest file from structured evidence in a fresh process, without target scratch files."""
+    try:
+        return unittest_in_context(target, path, test_context(target, {"test-context": {}}, None))
+    except Exception as exc:
+        return "unverified", "unittest harness could not resolve its default test context: %s" % exc
+
+
+def unittest_in_context(target, path, context=None, load_only=False):
+    """Run or load with the declared cwd and interpreter; extra evidence has its own scratch channel."""
+    try:
+        if not path.endswith(".py"):
+            return "unverified", "only Python unittest files are verified automatically; a non-test file the tests need belongs in support"
+        context = context or test_context(target, {}, None)
+        cwd = Path(context["directory"])
+        file = Path(target, path).resolve()
+        if not file.is_relative_to(cwd):
+            return "unverified", "outside the test context's cwd: %s" % context["cwd"]
+        relative = str(file.relative_to(cwd))
+        scratch_root = Path(tempfile.gettempdir()).resolve()
+        target_root = Path(target).resolve()
+        if scratch_root == target_root or target_root in scratch_root.parents:
+            scratch_root = target_root.parent
+        with tempfile.TemporaryDirectory(prefix="hacheong-red-", dir=scratch_root) as scratch:
+            report_path = Path(scratch, "report.json")
+            extra_path = Path(scratch, "extra.json")
+            done = subprocess.run([context["executable"], "-c", UNITTEST_RED_HARNESS, relative,
+                                   str(report_path), str(extra_path), "load" if load_only else "run"],
+                                  cwd=context["directory"], capture_output=True)
+            if done.returncode != 0:
+                return "unverified", "unittest harness exited unsuccessfully (%s)" % done.returncode
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            extra = json.loads(extra_path.read_text(encoding="utf-8"))
+        if load_only:
+            if extra["load_error"]:
+                return "unverified", extra["load_error"]
+            return "loaded", extra["loaded"]
+        verdict, detail = red_verdict(report)
+        if verdict == "unverified" and extra["first_problem"]:
+            detail += ' — "%s" (test context cwd=%s, python=%s)' % (
+                extra["first_problem"], context["cwd"], context["python"])
+        return verdict, detail
+    except Exception:
+        return "unverified", "unittest harness did not return a valid JSON report"
+
+
+def transcript_commands(stream_text, host):
+    """The shell commands and file reads a session made, from its stream — what it actually did, not what it says."""
+    cmds, reads = [], []
+    for line in (stream_text or "").split("\n"):
+        try:
+            d = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if host == "codex":
+            it = d.get("item") or {}
+            if d.get("type") == "item.completed" and it.get("type") == "command_execution":
+                cmds.append(it.get("command", ""))
+            elif d.get("type") == "item.completed" and it.get("type") == "file_change":   # apply_patch: the files it wrote
+                reads += [c.get("path", "") for c in it.get("changes") or [] if isinstance(c, dict)]
+        elif d.get("type") == "assistant":
+            for c in (d.get("message") or {}).get("content", []):
+                if c.get("type") == "tool_use":
+                    inp = c.get("input") or {}
+                    if c.get("name") == "Bash":
+                        cmds.append(inp.get("command", ""))
+                    elif c.get("name") in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep"):
+                        reads.append(inp.get("file_path") or inp.get("path") or inp.get("pattern") or "")
+    return cmds, reads
+
+
+def transcript_runs(stream_text, host):
+    """(command, output) for every shell command the session ran, from its stream: codex's `command_execution` items carry
+    both; Claude Code's Bash `tool_use` is answered by a `tool_result` (paired by id, else by order)."""
+    runs, pending = [], {}
+    for line in (stream_text or "").split("\n"):
+        try:
+            d = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if host == "codex":
+            it = d.get("item") or {}
+            if d.get("type") == "item.completed" and it.get("type") == "command_execution":
+                runs.append((it.get("command", ""), it.get("aggregated_output") or ""))
+            continue
+        msg = d.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        for c in content if isinstance(content, list) else []:
+            if not isinstance(c, dict):
+                continue
+            if d.get("type") == "assistant" and c.get("type") == "tool_use" and c.get("name") == "Bash":
+                pending[c.get("id") or len(pending)] = (c.get("input") or {}).get("command", "")
+            elif d.get("type") == "user" and c.get("type") == "tool_result" and pending:
+                key = c.get("tool_use_id") if c.get("tool_use_id") in pending else next(iter(pending))
+                body = c.get("content")
+                if isinstance(body, list):
+                    body = "\n".join(str(x.get("text", "")) for x in body if isinstance(x, dict))
+                runs.append((pending.pop(key), str(body or "")))
+    return runs
+
+
+# What a sandbox's refusal looks like in a command's output — each pattern seen in a real worker transcript (guin-site
+# .chongdae, 2026-09): wrangler/workerd (`wrangler dev`, `wrangler d1 execute --local`) refused a port; Python's
+# http.server for a fake S3 refused `socket.bind`; npm and curl could not resolve a registry or a host. Only a refusal to
+# bind or listen counts — the same sandbox also refuses writes outside the tree ("EPERM: operation not permitted, open
+# '…/.wrangler/logs/…'", xcrun's cache, a temp file), and those are not a missing capability this runner knows.
+LOOPBACK_DENIED = (
+    re.compile(r"\b(?:listen|bind) (?:EPERM|EACCES)\b[^\n]*"),                        # node: "Error: listen EPERM: operation not permitted 127.0.0.1"
+    re.compile(r"\bconnect (?:EPERM|EACCES) (?:127\.\d+\.\d+\.\d+|::1|localhost)\b[^\n]*"),
+)
+PY_SOCKET_DENIED = re.compile(r"^\s*(?:PermissionError|OSError|socket\.error): \[Errno (?:1|13)\] (?:Operation not permitted|Permission denied)\s*$")
+PY_SOCKET_CALL = re.compile(r"\.(?:bind|listen)\(|\bserver_(?:bind|activate)\(")
+NETWORK_DENIED = (
+    re.compile(r"\bgetaddrinfo (?:ENOTFOUND|EAI_AGAIN) (?!localhost\b|127\.)\S+"),    # npm: "… reason: getaddrinfo ENOTFOUND registry.npmjs.org"
+    re.compile(r"\bCould not resolve host: (?!localhost\b|127\.)\S+"),                 # curl, git: "curl: (6) Could not resolve host: d2fl….cloudfront.net"
+    re.compile(r"Temporary failure in name resolution|nodename nor servname provided, or not known"),   # urllib, pip, requests
+    re.compile(r"\bconnect ENETUNREACH\b[^\n]*|\bNetwork is unreachable\b"),
+)
+READERS = {"cat", "sed", "nl", "head", "tail", "less", "more", "rg", "grep", "egrep", "awk", "find", "ls", "jq", "wc", "diff", "printf", "echo"}
+
+
+def denial_in(output):
+    """{capability: the line that shows the sandbox refused it} for one command's output."""
+    found = {}
+    lines = output.split("\n")
+    for i, ln in enumerate(lines):
+        if "loopback" not in found:
+            m = next((p.search(ln) for p in LOOPBACK_DENIED if p.search(ln)), None)
+            if m:
+                found["loopback"] = m.group(0).strip()
+            elif PY_SOCKET_DENIED.match(ln) and any(PY_SOCKET_CALL.search(p) for p in lines[max(0, i - 6):i]):
+                found["loopback"] = ln.strip()   # a socket refused, not a file: the error line ends without a path
+        if "network" not in found:
+            m = next((p.search(ln) for p in NETWORK_DENIED if p.search(ln)), None)
+            if m:
+                found["network"] = m.group(0).strip()
+    return found
+
+
+def sandbox_denials(stream_text, host, can):
+    """{capability: (command, quoted line)} — the first command whose own output shows the sandbox refusing a capability
+    this member lacks on this host (`can`, from capabilities()). A capability it has is never flagged: a refusal there is
+    the program's own failure. A command that only prints text (cat, sed, rg …) shows a file, not a refusal."""
+    found = {}
+    for command, output in transcript_runs(stream_text, host):
+        toks = shell_tokens(command)
+        if toks and os.path.basename(toks[0]) in READERS:
+            continue
+        for cap, line in denial_in(output).items():
+            if not can.get(cap, True) and cap not in found:
+                found[cap] = (command, line)
+    return found
+
+
+def mark_lacked(out, member, request, stream_text, host):
+    """After the call: what the member hit mid-task that its sandbox lacks goes into the answer as `lacked` and a non-claim
+    starting `sandbox lacked: ` — a hiring question for the runner, not a decision the contract left open. The status is the
+    member's, unless it said `done` while a refused command was part of its job (a request check, a check it reports in
+    `verified`, one of its tests) or while listing a lack itself: then it is `blocked`. The member's own `lacked` is merged
+    with what the transcript shows; one only it says is named as its word, not as observed."""
+    denied = sandbox_denials(stream_text, host, capabilities(member, host))
+    said = [c for c in out.get("lacked") or [] if c in CAPABILITIES]   # the member's own word, from the prompt's `# Where you run`
+    if not denied and not said:
+        out.pop("lacked", None)   # `[]` is nothing lacked: said as no field, so a reader tests one thing
+        return out
+    job = [shell_tokens(" ".join(c) if isinstance(c, list) else str(c)) for c in request.get("checks") or []]
+    job += [shell_tokens(re.sub(r"\s*\(.*\)\s*$", "", str((v or {}).get("check", "")))) for v in out.get("verified") or [] if isinstance(v, dict)]
+    tests = [str(t) for t in (request.get("tests") or []) + (out.get("tests") or []) if isinstance(t, str)]
+    names = {n for t in tests for n in (t, os.path.basename(t), os.path.splitext(os.path.basename(t))[0])}
+    in_job = False
+    for cap in sorted(denied):
+        command, line = denied[cap]
+        ran = shell_tokens(command)
+        if any(j and (contains(ran, j) or (len(j) > 1 and contains(ran, j[1:]))) for j in job) or any(
+                n and n in tok for n in names for tok in ran):
+            in_job = True
+        out.setdefault("non-claims", []).append(
+            "sandbox lacked: %s — %s on %s cannot %s; `%s` failed with \"%s\" — give it to a member that can, or to the session"
+            % (cap, member["name"], host, "bind a local port" if cap == "loopback" else "reach the network",
+               " ".join(ran)[:200], line[:200]))
+    for cap in sorted(set(said) - set(denied)):
+        out.setdefault("non-claims", []).append(
+            "sandbox lacked: %s — %s on %s says it cannot %s (the member's word in `lacked`, not observed in its transcript) — "
+            "give it to a member that can, or to the session"
+            % (cap, member["name"], host, "bind a local port" if cap == "loopback" else "reach the network"))
+    out["lacked"] = sorted(set(said) | set(denied))
+    if out.get("status") == "done" and (in_job or said):   # what it says it lacked was work it did not do
+        out["status"] = "blocked"
+    return out
+
+
+CODE_EXT = (".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".go", ".rs", ".rb", ".java", ".kt", ".swift", ".c", ".cc", ".cpp", ".h", ".sql", ".sh")
+
+
+def named_by(stream_text, host, path):
+    """Whether this member's own transcript names `path` — in a command it ran, or as a file it read, edited or wrote. A file
+    the transcript never names changed by another hand during the call (a session working the same tree)."""
+    cmds, touched = transcript_commands(stream_text, host)
+    base = path.replace("\\", "/")
+    return any(base in str(c) for c in cmds) or any(str(t).replace("\\", "/").endswith(base) for t in touched if t)
+
+
+def shell_touch(command, path):
+    """Classify a named path conservatively; only a proved reader earns the relaxation."""
+    import shlex
+    text = str(command).strip()
+    wrapper = re.match(r"^(?:/bin/)?(?:ba|z)?sh -l?c (.*)$", text, re.S)
+    try:
+        if wrapper:
+            # unwrapped only when the quoted argument is the whole command; otherwise the full text is classified as written
+            words = shlex.split(wrapper.group(1))
+            if len(words) == 1:
+                text = words[0]
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|<>()\n")
+        lexer.commenters = ""
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except (ValueError, IndexError):
+        return "unclear", text
+    # Separate shell commands, retaining pipelines for the proof of a read.
+    groups, pipeline, argv = [], [], []
+    for tok in tokens + [";"]:
+        if tok == "|":
+            pipeline.append(argv)
+            argv = []
+        elif tok in (";", "&&", "||", "\n", "&") or tok and set(tok) == {"\n"}:
+            pipeline.append(argv)
+            groups.append(pipeline)
+            pipeline, argv = [], []
+        else:
+            argv.append(tok)
+
+    def matches(word):
+        return word == path or word.endswith("/" + path)
+
+    readers = {"cat", "head", "tail", "nl", "wc", "less", "more", "grep", "egrep", "fgrep", "rg",
+               "sed", "ls", "stat", "file", "jq", "diff", "cmp", "echo", "printf"}
+    git_readers = {"show", "diff", "log", "status", "blame", "ls-files"}
+    writes = {">", ">>", ">|", "&>", "&>>", ">&", ">>&", "<>"}
+
+    def reader_effect(args):
+        """Reader switches and scripts need their own proof; a reader name is not enough."""
+        cmd, operands = os.path.basename(args[0]), args[1:]
+        targets, uncertain = [], False
+        if cmd == "sed":
+            scripts = []
+            i = 0
+            while i < len(operands):
+                arg = operands[i]
+                if arg == "--in-place" or arg.startswith("--in-place="):
+                    return "wrote" if any(matches(a) for a in operands) else "unclear"
+                if arg in ("-e", "--expression"):
+                    i += 1
+                    if i < len(operands):
+                        scripts.append(operands[i])
+                    else:
+                        uncertain = True
+                elif arg.startswith("--expression="):
+                    scripts.append(arg.split("=", 1)[1])
+                elif arg.startswith("-") and not arg.startswith("--"):
+                    # e/f consume the rest as an argument, not as option letters.
+                    for j, option in enumerate(arg[1:], 1):
+                        if option in "iI":
+                            return "wrote" if any(matches(a) for a in operands) else "unclear"
+                        if option in "ef":
+                            value = arg[j + 1:]
+                            if not value:
+                                i += 1
+                                value = operands[i] if i < len(operands) else ""
+                            if option == "e" and value:
+                                scripts.append(value)
+                            else:
+                                uncertain = True
+                            break
+                        if option not in "nEr":
+                            uncertain = True
+                elif arg.startswith("-"):
+                    # File scripts and unrecognised options cannot prove a simple read.
+                    if arg not in ("-n", "-E", "-r", "-nE", "-En", "--quiet", "--silent", "--regexp-extended"):
+                        uncertain = True
+                elif not scripts:
+                    scripts.append(arg)
+                i += 1
+            address = r"(?:\d+|\$|/(?:\\.|[^/\\])*/)"
+            for script in scripts:
+                # Accept only simple print/delete and stdout-only substitutions.
+                simple = re.fullmatch(r"(?:" + address + r"(?:," + address + r")?)?[pdq]", script)
+                substitution = re.fullmatch(r"s([^\w\s\\])((?:\\.|(?!\1)[^\\])*)\1((?:\\.|(?!\1)[^\\])*)\1(.*)", script)
+                safe_substitution = substitution and re.fullmatch(r"[gp0-9]*", substitution.group(4))
+                if not simple and not safe_substitution:
+                    uncertain = True
+                    # w/W takes the rest of the script as its output filename.
+                    write = (re.search(r"[wW]\s+(.+)$", substitution.group(4)) if substitution else
+                             re.search(r"(?:^|[;/\d$])\s*[wW]\s+(.+)$", script))
+                    if write:
+                        targets.append(write.group(1).strip())
+            uncertain |= not scripts
+        elif cmd == "rg":
+            uncertain = any(a == "--pre" or a.startswith("--pre=") for a in operands)
+        elif cmd == "git":
+            for i, arg in enumerate(operands):
+                if arg == "--output":
+                    uncertain = True
+                    if i + 1 < len(operands):
+                        targets.append(operands[i + 1])
+                elif arg.startswith("--output="):
+                    uncertain = True
+                    targets.append(arg.split("=", 1)[1])
+            uncertain |= any(a in ("--ext-diff", "--textconv") for a in operands)
+        elif cmd == "less":
+            for i, arg in enumerate(operands):
+                if arg in ("-o", "-O"):
+                    uncertain = True
+                    if i + 1 < len(operands):
+                        targets.append(operands[i + 1])
+                elif arg.startswith(("-o", "-O")):
+                    uncertain = True
+                    targets.append(arg[2:])
+        if any(matches(t) for t in targets):
+            return "wrote"
+        return "unclear" if uncertain else "read"
+
+    for group in groups:
+        for args in group:
+            if not args:
+                continue
+            if any(tok in writes and i + 1 < len(args) and matches(args[i + 1])
+                   for i, tok in enumerate(args)):
+                return "wrote", text
+            cmd = os.path.basename(args[0])
+            operands = args[1:]
+            if reader_effect(args) == "wrote":
+                return "wrote", text
+            writer = cmd in {"tee", "rm", "unlink", "mv", "touch", "truncate", "ln"}
+            writer |= cmd == "cp" and bool(operands) and matches(operands[-1])
+            writer |= cmd == "perl" and any(a.startswith("-i") for a in operands)
+            writer |= cmd == "git" and bool(operands) and operands[0] in {"checkout", "restore", "rm", "mv"}
+            if writer and any(matches(a) for a in operands):
+                return "wrote", text
+    if any(x in text for x in ("$(", "`", "<(", ">(", "<<")):
+        return "unclear", text
+    mentions = []
+    for group in groups:
+        if not any(path in arg for args in group for arg in args):
+            continue
+        only_readers = True
+        whole_word = False
+        for args in group:
+            if not args:
+                only_readers = False
+                continue
+            cmd = os.path.basename(args[0])
+            is_reader = cmd in readers or cmd == "git" and len(args) > 1 and args[1] in git_readers
+            if reader_effect(args) != "read":
+                is_reader = False
+            if not is_reader or any(a in writes or a in ("(", ")") for a in args):
+                only_readers = False
+            for arg in args[1:]:
+                if path in arg:
+                    named = matches(arg) or cmd == "git" and args[1] == "show" and ":" in arg and arg.split(":", 1)[1] == path
+                    whole_word |= named
+                    if not named:
+                        only_readers = False
+        mentions.append(only_readers and whole_word)
+    return ("read" if mentions and all(mentions) else "unclear"), text
+
+
+def transcript_touch(stream_text, host, path):
+    """Strongest mention wins: wrote > unclear > read; preserve every old named_by match."""
+    if not stream_text:
+        return "wrote", ""
+    if not named_by(stream_text, host, path):
+        return "never", ""
+    mentions = []
+    commands, _ = transcript_commands(stream_text, host)
+    for command in commands:
+        if path in str(command):
+            mentions.append(shell_touch(command, path))
+    for line in stream_text.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if host == "codex":
+            item = event.get("item") or {}
+            if event.get("type") == "item.completed" and item.get("type") == "file_change":
+                for change in item.get("changes") or []:
+                    if isinstance(change, dict) and str(change.get("path", "")).replace("\\", "/").endswith(path):
+                        mentions.append(("wrote", "file_change"))
+        elif event.get("type") == "assistant":
+            for item in (event.get("message") or {}).get("content", []):
+                if item.get("type") != "tool_use":
+                    continue
+                inp = item.get("input") or {}
+                name = item.get("name")
+                value = inp.get("file_path") or inp.get("path") or inp.get("pattern") or ""
+                if not str(value).replace("\\", "/").endswith(path):
+                    continue
+                if name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+                    mentions.append(("wrote", name))
+                elif name in ("Read", "Grep", "Glob"):
+                    mentions.append(("read", name))
+    return max(mentions or [("unclear", "")], key=lambda x: {"read": 0, "unclear": 1, "wrote": 2}[x[0]])
+
+
+def shell_tokens(command):
+    """A command as its argv: the host's `/bin/zsh -lc "..."` wrapper unwrapped, quoting resolved. Unparseable text stays whole."""
+    import shlex
+    c = str(command).strip()
+    m = re.match(r"^(?:/bin/)?(?:ba|z)?sh -l?c (.*)$", c, re.S)
+    try:
+        if m:
+            c = shlex.split(m.group(1))[0]
+        return shlex.split(c)
+    except ValueError:
+        return c.split()
+
+
+def leading_cd(tokens, target):
+    """(directory, the rest): a command's leading `cd DIR &&`s that stay inside the project, as the directory they reach
+    (relative to the project's root, `.` when there is none) and the argv after them. A host's shell keeps its directory
+    between calls, so a builder that ran `python3 tests/run.py` there reports `cd <project> && python3 tests/run.py` — the
+    same check (guin-site: 7 of 8 refusals in one cycle). A `cd` that leaves the project, or that only the shell could
+    resolve (`cd -`, `$VAR`, a backquote, a glob), is part of the command: (None, tokens)."""
+    root = os.path.realpath(target or ".")
+    here, rest = root, tokens
+    while len(rest) > 3 and rest[0] == "cd" and rest[2] == "&&":
+        d = rest[1]
+        if not d or d == "-" or re.search(r"[$`*?\[]", d):
+            return None, tokens
+        d = os.path.expanduser(d)
+        here = os.path.realpath(d if os.path.isabs(d) else os.path.join(here, d))
+        if here != root and not here.startswith(root + os.sep):
+            return None, tokens
+        rest = rest[3:]
+    return os.path.relpath(here, root), rest
+
+
+def ran_as_claimed(ran, toks, target):
+    """A claimed check `toks` is (part of) the command `ran`: as written, or — when the claim leads with a `cd` inside the
+    project — run in the same directory (a command with no leading `cd` ran where the shell stood: the project's root)."""
+    def found(seq, sub):
+        core = sub[1:] if len(sub) > 1 else sub   # drop the interpreter: python vs python3
+        return contains(seq, sub) or bool(core and contains(seq, core))
+    if found(ran, toks):
+        return True
+    where, rest = leading_cd(toks, target)
+    if where is None or rest is toks:
+        return False
+    ran_where, ran_rest = leading_cd(ran, target)
+    return ran_where == where and found(ran_rest, rest)
+
+
+def contains(seq, sub):
+    """`sub` occurs in `seq` as a contiguous run (a check run as part of a longer command line still ran)."""
+    n = len(sub)
+    return n > 0 and any(seq[i:i + n] == sub for i in range(len(seq) - n + 1))
+
+
+def validate(out, member, request, target, stream_text, host, before, protected_before=None):
+    """Run the member's declared validators. Each failure is written into the answer as a non-claim and the status becomes
+    `failed` — an answer that broke its own rules is not an answer, whatever it says about itself."""
+    problems = []
+    cmds, reads = transcript_commands(stream_text, host)
+    for spec in member["policy"].get("validate", []):
+        name, _, arg = spec.partition(":")
+        if name == "quotes-required":
+            # arg: "findings.quote" — every item of `findings` has a non-empty `quote`
+            coll, _, field = arg.partition(".")
+            items = out.get(coll) or []
+            missing = [i for i, f in enumerate(items) if not isinstance(f, dict) or not str(f.get(field or "quote", "")).strip()]
+            if missing:
+                problems.append("quotes-required: %s[%s] carry no %s — a finding without a quote is an opinion" % (coll, ",".join(map(str, missing)), field or "quote"))
+        elif name == "no-tree-changes":
+            after = tree_state(target)
+            if before is not None and after is not None and after != before:
+                changed = sorted(set(k for k in set(before) | set(after) if before.get(k) != after.get(k)))
+                problems.append("no-tree-changes: the tree changed (%s) — this member may not touch the project" % ", ".join(changed[:8]))
+        elif name == "checks-ran":
+            # every `verified[].check` must appear as (part of) a command the session actually ran — compared as shell tokens,
+            # not as text: `-p 'test_s[12].py'` ran quoted (the shell would glob it) and is the same argv reported unquoted;
+            # a leading `cd` into the project is where it ran, not what ran (ran_as_claimed)
+            ran = [shell_tokens(c) for c in cmds]
+            for v in out.get("verified") or []:
+                check = re.sub(r"\s*\(.*\)\s*$", "", str((v or {}).get("check", ""))).strip()   # a trailing remark — "(8 tests, OK)" — is not part of the command
+                toks = shell_tokens(check)
+                if check and not any(ran_as_claimed(r, toks, target) for r in ran):
+                    problems.append("checks-ran: `%s` is claimed verified but no such command appears in the session's transcript (report the argv you ran, nothing else)" % check)
+        elif name == "red-before-build":
+            # the tests this member wrote must prove red now: a contract test that passes before the build decides nothing. Not when
+            # the request amends tests the build disputed (`amending`): the build already stands, and the corrected tests may pass
+            if request.get("amending"):
+                continue
+            tests = out.get("tests", [])
+            if not isinstance(tests, list):
+                problems.append("red-before-build: tests must be an array")
+                continue
+            # code already changed and uncommitted when the call began — an earlier build attempt left in the tree — can make a
+            # correct new test pass before this slice's build; that is not the test deciding nothing (guin-site s2-tests-nobind)
+            built_before = sorted(p for p in (before or {}) if p.endswith(CODE_EXT) and not p.startswith(("tests/", "test/"))
+                                  and p not in (out.get("tests") or []))
+            # a declared test its writer deleted, or one the request names in `deleted-tests`, is the contract's own change: said, skipped
+            # (guin-site Q-cleanup: four retired test files refused a finished tests task four times as "does not exist")
+            retired = set(path_list(request.get("deleted-tests")))
+            support = out.get("support")
+            if support is None:
+                support = []
+            if not isinstance(support, list) or any(not isinstance(t, str) for t in support):
+                problems.append("red-before-build: support must be an array of strings")
+                support = []
+            unsafe = set()
+            for t in support:
+                try:
+                    safe = (bool(t) and not os.path.isabs(t) and ".." not in t.split("/")
+                            and "\\" not in t and "\0" not in t
+                            and Path(target, t).resolve().is_relative_to(Path(target).resolve()))
+                except (OSError, ValueError, RuntimeError):
+                    safe = False
+                if not safe:
+                    problems.append("red-before-build: support %r is not a safe project-relative path" % t)
+                    unsafe.add(t)
+                if t not in tests:
+                    problems.append("red-before-build: support %s is not in tests" % t)
+            protected_support = []
+            if tests and all(t in support for t in tests):
+                problems.append("red-before-build: no runnable test — every entry is support")
+            context, context_error = None, None
+            try:
+                context = test_context(target, request, before)
+            except (ValueError, OSError) as exc:
+                context_error = str(exc)
+            for t in dict.fromkeys(tests + support):
+                if t in unsafe:
+                    continue
+                p = os.path.join(target, t)
+                if t in retired and not os.path.exists(p):
+                    continue
+                if not os.path.exists(p) and deleted_by_writer(target, t, before):
+                    out.setdefault("non-claims", []).append("deleted by the writer: %s — the contract retires it" % t)
+                    continue
+                if not os.path.exists(p):
+                    problems.append("red-before-build: %s does not exist" % t)
+                    continue
+                if t in support:
+                    if not os.path.isfile(p):
+                        problems.append("red-before-build: support %s must be a regular file (list the files themselves)" % t)
+                        continue
+                    if t in tests:
+                        protected_support.append(t)
+                    if re.fullmatch(r"test.*\.py", os.path.basename(t)):
+                        problems.append("red-before-build: %s is declared support — a test*.py file is a test module" % t)
+                    elif t.endswith(".py"):
+                        verdict, detail = (("unverified", context_error) if context_error else
+                                           unittest_in_context(target, t, context, load_only=True))
+                        if verdict == "loaded" and detail:
+                            problems.append("red-before-build: %s is declared support — it holds %s tests" % (t, detail))
+                        elif verdict == "unverified":
+                            out.setdefault("non-claims", []).append(
+                                "%s could not be loaded to confirm it holds no tests: %s" % (t, detail))
+                    continue
+                verdict, detail = (("unverified", context_error) if context_error else
+                                   unittest_in_context(target, t, context))
+                if verdict == "unverified":
+                    problems.append("red-before-build: %s is not verified red — %s" % (t, detail))
+                elif verdict == "green" and built_before:
+                    out.setdefault("non-claims", []).append("red-before-build could not decide %s: it passes, and code was already changed "
+                                                            "before this call (%s) — an earlier build may be what it passes against"
+                                                            % (t, ", ".join(built_before[:6])))
+                elif verdict == "green":
+                    problems.append("red-before-build: %s passes before the build — it decides nothing" % t)
+            if protected_support:
+                out.setdefault("non-claims", []).append(
+                    "support (protected with the tests, not red evidence): " + ", ".join(protected_support))
+        elif name == "only-tests-touched":
+            after = tree_state(target)
+            if before is not None and after is not None:
+                changed = sorted(set(k for k in set(before) | set(after) if before.get(k) != after.get(k)))
+                allowed = set(out.get("tests") or [])
+                stray = [c for c in changed if c not in allowed and not c.startswith(("tests/", "test/"))]
+                # judged by what this member did, not by what the tree did: a file its transcript never names was changed by another
+                # hand during the call (the session writing code beside a tests worker, guin-site s4-tests). No transcript: strict.
+                evidence = {c: transcript_touch(stream_text, host, c) for c in stray}
+                others = [c for c in stray if evidence[c][0] == "never"]
+                mine = [c for c in stray if evidence[c][0] == "wrote"]
+                unclear = [c for c in stray if evidence[c][0] == "unclear"]
+                read = [c for c in stray if evidence[c][0] == "read"]
+                if unclear:
+                    problems.append("only-tests-touched: %s were named only in commands that could have written them "
+                                    "(a read could not be told from a write): %s" %
+                                    (", ".join(unclear[:8]), repr(evidence[unclear[0]][1][:120])))
+                if read:
+                    out.setdefault("non-claims", []).append(
+                        "only read evidence observed in this member's transcript; write ownership was not established: "
+                        + ", ".join(read[:8]))
+                if mine:
+                    problems.append("only-tests-touched: changed outside the tests it declared: %s" % ", ".join(mine[:8]))
+                if others:
+                    out.setdefault("non-claims", []).append("changed during the call by another hand (this member's transcript never names them), "
+                                                            "not held against it: %s" % ", ".join(others[:8]))
+        elif name == "tests-kept":
+            # the request's `tests` are the contract's, as they were in the tree when the session started (committed or not):
+            # a build that changed one — or put it back to HEAD — decided its own verdict. Said here, at the end of this call,
+            # not later as checks failing against tests nobody meant
+            # `deleted-tests`: the contract's tests its writer deleted (a contract that retires a feature). They stay deleted: a build
+            # that brings one back changed the contract as surely as one that edits a kept test
+            retired = path_list(request.get("deleted-tests"))
+            back = [t for t in retired if os.path.lexists(os.path.join(target, t))]
+            if back:
+                problems.append("tests-kept: the contract's deleted tests are in the tree (%s) — its tests writer deleted them, the contract "
+                                "retires them; a build that brings one back changed the contract" % ", ".join(back))
+            kept = [t for t in path_list(request.get("tests")) if t not in retired]
+            after = tree_state(target)
+            baseline = protected_before if protected_before is not None else before
+            current = protected_tests(target, request) if protected_before is not None else after
+            if baseline is not None and current is not None:
+                changed = [t for t in kept if baseline.get(t) != current.get(t)]
+                absent = [t for t in kept if not os.path.isfile(os.path.join(target, t))]
+                if absent:
+                    problems.append("tests-kept: the contract's protected tests are not in the tree (%s) — nothing kept them; "
+                                    "a path list given as one string is one missing path" % ", ".join(absent))
+                if changed:
+                    problems.append("tests-kept: changed the contract's protected tests (%s) — they are the contract as given, "
+                                    "uncommitted changes included; a test that contradicts the contract goes in `disputed-tests`" % ", ".join(changed))
+        elif name == "explanation-kept":
+            # a refactoring keeps what the program says about itself: no public name, docstring or comment present at HEAD is
+            # gone from the tree. Counted over the whole project, since moving is the point. Only in the refactor domain;
+            # elsewhere a build may rightly delete. (A site's split lost 11 docstrings and 15 comments; a second task restored them.)
+            if request.get("domain") != "refactor":
+                continue
+            names0, docs0, comm0 = inventory(target, at_head=True)
+            names1, docs1, comm1 = inventory(target, at_head=False)
+            lost = sorted(names0 - names1)
+            gone = []
+            if lost:
+                gone.append("public names gone: %s" % ", ".join(lost[:8]))
+            if docs1 < docs0:
+                gone.append("docstrings %d -> %d" % (docs0, docs1))
+            if comm1 < comm0:
+                gone.append("comment lines %d -> %d" % (comm0, comm1))
+            if gone:
+                problems.append("explanation-kept: a refactoring moves code and keeps what it says about itself; against HEAD, %s — put them back where the code went" % "; ".join(gone))
+        elif name == "readme-only":
+            # a newbie reads docs and runs the program; opening source is peeking. Bash reads count too.
+            doc = re.compile(r"(^|/)(README[^/]*|readme[^/]*|docs?/|CHANGELOG[^/]*|LICENSE[^/]*)$|\.md$", re.I)
+            if request.get("domain") == "site":
+                # a site's product is its generated pages: reading one is what a visitor does, not peeking at the source
+                doc = re.compile(doc.pattern + r"|\.(?:html?|css|png|jpe?g|gif|svg|webp|xml|txt)$", re.I)
+            readers = re.compile(r"^\s*(?:\w+=\S+\s+)*(cat|less|more|head|tail|sed|awk|grep|rg|bat|vim|nano|view|strings|od|xxd)\b")
+
+            def in_project(tok):   # a file of the project tree (not the scratch dir, not the program being *run*)
+                full = tok if os.path.isabs(tok) else os.path.join(target, tok)
+                try:
+                    return os.path.isfile(full) and os.path.realpath(full).startswith(os.path.realpath(target) + os.sep)
+                except OSError:
+                    return False
+            peeked = [r for r in reads if r and not doc.search(r) and in_project(r)]
+            for c in cmds:
+                for seg in re.split(r"\|\||&&|[;|\n]", c):   # each pipeline segment on its own: `cat todo.json | python3 todo.py` reads the json, runs the py
+                    if readers.search(seg):
+                        for tok in re.findall(r"[\w./-]+", seg):
+                            if "." in tok and not doc.search(tok) and in_project(tok):
+                                peeked.append(tok)
+            if peeked:
+                problems.append("readme-only: read what a newbie would not (%s) — the report is tainted by knowledge of the source" % ", ".join(sorted(set(peeked))[:8]))
+    if problems:
+        out["status"] = "failed"
+        out.setdefault("non-claims", []).extend(problems)
+        out["validation"] = {"failed": [p.split(":")[0] for p in problems]}
+    return out
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--member", required=True, help="a member's name (members/<name>, or the project's hacheong/members/<name>) or a directory")
+    ap.add_argument("--request", required=True)
+    ap.add_argument("--response", required=True)
+    ap.add_argument("--host", choices=["claude", "codex"], default="claude")
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--effort", default=None)
+    ap.add_argument("--max-turns", type=int, default=None, help="turn budget (default: the member's policy `max-turns`, else 40)")
+    ap.add_argument("--domain", default=None, help="override the domain the request implies (code, plan, design, …)")
+    ap.add_argument("--prompt-only", action="store_true", help="print a neutral native prompt and exit — for a session that dispatches the host's own subagent (a `native:` provider)")
+    args = ap.parse_args()
+    request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    if request.get("artifact-type") != "chongdae/request@1":
+        raise SystemExit("not a chongdae request: %s" % args.request)
+    target = request.get("target") or os.getcwd()
+    member = load_member(args.member, target)
+    if args.max_turns is None:
+        args.max_turns = int(member["policy"].get("max-turns", os.environ.get("HACHEONG_MAX_TURNS", 40)))
+    domain = domain_for(request, args.domain)
+    prompt, _ = assemble(member, request, domain, target, args.host, native=args.prompt_only)
+    if args.prompt_only:
+        print(prompt + "\n\n# Answer\n\nYour whole final message is one JSON object, nothing else, matching this schema:\n" + json.dumps(member["schema"]))
+        return 0
+    # what the request needs and this member cannot do here is said before any call: a worker that learns it mid-task spends
+    # the call, and a runner that learns it from a blocked answer has already waited for it
+    lacking = missing_needs(request, member, args.host)
+    if lacking:
+        out = {"status": "blocked", "summary": "needs %s, which %s on %s cannot do" % (", ".join(lacking), member["name"], args.host),
+               "non-claims": ["not attempted: the request needs %s; %s on %s has %s — give the task to a member that has it, or to the session"
+                              % (", ".join(lacking), member["name"], args.host,
+                                 ", ".join("%s: %s" % (k, "yes" if v else "no") for k, v in capabilities(member, args.host).items()))]}
+    else:
+        before = tree_state(target)
+        protected_before = protected_tests(target, request)
+        out, stream = (claude if args.host == "claude" else codex)(prompt, member, args, target)
+        out = validate(out, member, request, target, stream, "codex" if args.host == "codex" else "claude-code", before, protected_before)
+        # a task that did not declare `needs` learns it mid-task: the refusal in a command's output is said as such
+        out = mark_lacked(out, member, request, stream, args.host)
+    # the answer used to carry `member` and `domain` too; no reader ever consulted them — the runner named both when it asked
+    Path(args.response).parent.mkdir(parents=True, exist_ok=True)
+    with open(args.response + ".tmp", "w", encoding="utf-8", newline="\n") as fh:   # LF on every host; the response is diffed and fingerprinted
+        fh.write(json.dumps(out, ensure_ascii=False, indent=2) + "\n")
+    os.replace(args.response + ".tmp", args.response)   # whole or absent: the runner polls for this file
+    print("%s (%s, %s) -> %s" % (out.get("status"), member["name"], domain, args.response))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

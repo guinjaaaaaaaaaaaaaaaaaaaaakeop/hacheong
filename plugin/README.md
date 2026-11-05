@@ -1,0 +1,228 @@
+# hacheong (하청)
+
+The subcontractor of the LLM-development era: the people a plan hires by role. Each member is a **disposition**, not a
+job — the same person can be sent at code today and at a plan or a design tomorrow — and each call is a fresh
+process with one answer. One runner serves every member; a member is a directory (a role text, an answer schema, a
+policy), so anyone can add one. What a member may not do is enforced after the fact by the runner, never merely asked
+of the model.
+
+| member | role key | when | reads | answers |
+|---|---|---|---|---|
+| **닥돌** dakdol | `build` | the build | the contract and the tree | the slice, `verified` checks, `decisions`, `non-claims` |
+| **시비** sibi | `quibble` | before a build | the contract only | what is `undecided`, a `contradiction`, `unchecked` — each with a quote |
+| **트집** teujip | `nitpick` | before a build | the contract only | the tests that will decide it, written to fail; the runner checks they are red |
+| **초짜** chojja | `newbie` | after a build | what the person the work is for would get: the README and the program (a plan: the goal and the plan) | what `did-not-work`, is `unclear`, or a `surprise` — each with a quote |
+
+## Install
+
+Requires **Python 3.11 or later**. CLI and hook examples invoke `python3`; ensure that command resolves to a supported interpreter.
+
+```sh
+claude plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong
+claude plugin install hacheong@hacheong
+```
+
+Codex: `codex plugin marketplace add guinjaaaaaaaaaaaaaaaaaaaaakeop/hacheong`, `codex plugin add hacheong@hacheong`. A
+project declares who it hires in hunsu.json: `"roles": {"implementer": "hacheong:build", "verifier": "dwitbuk:eyes"}`
+— hunsu resolves `hacheong:build` to the argv below and locks it; chongdae spawns argv.
+
+## Shared guidance and hosts
+
+[skills/hire/SKILL.md](skills/hire/SKILL.md) is the shared installed procedure for Claude Code and Codex. Both use
+this same file; there is no separate host-specific copy of the hiring workflow. The Python CLI is also shared.
+For example, replace these quoted paths with the plugin and project directories:
+
+```sh
+python3 "/path/to/hacheong/hacheong.py" roster --target "/path/to/project"
+python3 "/path/to/hacheong/worker.py" --help
+```
+
+`worker.py --host claude` or `--host codex` selects the worker adapter. Installation, permissions and host settings
+remain host-specific; the payload carries `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, and the source
+repository's catalogs (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`) point at it.
+Host entry points should refer to the shared skill or invoke their declared CLI action, not maintain another workflow.
+
+Maintainer guidance lives in the source repository's AGENTS.md and is not part of the installed plugin.
+
+## How a member is called
+
+```
+python3 "<plugin root>/worker.py" --member <name> --request <request-file> --response <response-file> [--host claude|codex] [--model M] [--effort E] [--max-turns N] [--domain D]
+```
+
+This is argument notation: replace placeholders and choose one host. `--request` takes a JSON file whose
+`artifact-type` is `chongdae/request@1`, not the artifact type string itself. The default host is `claude`.
+
+The runner assembles the prompt — `members/<name>/ROLE.md` ⊕ `domains/<domain>/DOMAIN.md` (its common part and the `##
+<member>` section) ⊕ the request — starts a fresh host session with the member's `policy.json` (tools, sandbox, turn
+budget) and `answer.json` as the enforced output schema, runs the member's validators over the answer and the
+session's transcript, and writes the answer atomically with `worker` (host, model, turns, cost, session, the
+transcript file kept next to it). The domain comes from the request: `domain` if it says so, else the artifact's
+family (`produces: plan/…` → `plan`), else `code`. A claude session that stops at its turn budget (`error_max_turns`) is
+followed by up to two more (`HACHEONG_CONTINUATIONS`, 0 or more; not a number reads as 2), each told the earlier one ran out and to continue from the tree; the
+validators read all their commands, the answer is the last one's, and `worker` adds `continued` with the turns and cost
+summed. (The answer carried `member` and `domain` until 1.7.2; nothing read
+them — the runner named both when it asked.)
+
+Every answer carries the envelope any runner reads — `status` (`done` | `blocked` | `failed`), `summary`, `non-claims`,
+and `lacked` (`network` | `loopback`: what the place it ran lacked; listed in the schema's `required` because Codex's
+output schema is strict, but `[]` is written out as no field) — plus the member's own fields. A validator that fails makes the answer `failed` with the reason as a non-claim: an
+answer that broke its own rules is not an answer.
+
+`--prompt-only` prints the role/domain/request and answer schema, then exits — for a session that dispatches its host's
+own subagent (chongdae's `native:hacheong:quibble`) and writes the subagent's answer verbatim. It does not run capability
+checks, a host session or the post-call validators. Its environment section is the same with `--host claude` or
+`--host codex`: it says the subagent's permissions, tools, network and loopback come from the parent host and its
+configuration, and that the renderer grants nothing. It describes no sandbox and is not evidence of the native
+session's actual tools or capabilities.
+
+## Validators (the runner's, chosen per member in `policy.json`)
+
+`quotes-required:<collection>.<field>` every item carries a non-empty quote · `no-tree-changes` the tree is as it was
+(git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
+quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
+the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every runnable file (`tests` minus `support`) is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter using the test context's `cwd` and `python` (request `test-context`, else project `hacheong/test-context.json`; omitted keys default to the project root and `python3`, else `python`), it ran at least one test and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` classifies mentions of changes outside `tests`, `tests/` or `test/`: wrote fails, unclear fails with a command quote, proved reads are not held against the member · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
+uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
+shell) — a newbie who peeked is tainted.
+
+## Adding a member
+
+`python3 <plugin root>/hacheong.py new <name>` scaffolds `members/<name>/` (ROLE.md with placeholders, answer.json,
+policy.json); write the sentences, pick the kinds and validators, add one `roles` line to plugin.json (all three
+copies), `hacheong.py check`, then `hacheong.py try <name> --request <a real request>` to see the validated answer. No
+Python.
+
+Three places a member can live, one runner: this plugin (`members/`); a project (`<project>/hacheong/members/<name>/`,
+called as `--member ./hacheong/members/<name>` — the project's members and domains shadow the plugin's); another
+plugin that ships its own `members/` and declares roles pointing at this runner (`{plugin:hacheong}/worker.py --member
+{plugin:theirs}/members/x`). Domains the same way: `domains/<name>/DOMAIN.md` here or under the project's
+`hacheong/domains/`.
+
+## What is fixed
+
+The request and the answer envelope (chongdae's request, `status/summary/non-claims`, `worker`), the host adapters,
+the validator set. A member may not change these; when they must change, this plugin's version does.
+
+## Limits
+
+- `--max-turns` and `HACHEONG_CONTINUATIONS` bound Claude calls only. The Codex adapter passes no turn or wall-clock
+  limit to `codex exec`; its call ends when the host exits.
+- `red-before-build` verifies runnable Python `unittest` files only, in the declared test context through a
+  harness that reports unittest's own result in a scratch file outside the project. A direct script, a pytest-style
+  module, a JavaScript test or any other non-`.py` file is `not verified red` and fails the answer; no other runner is
+  chosen from a file's extension or directory. Support belongs in `support` and `tests`: it stays protected but is not red evidence.
+  `support` must be an array of safe project-relative paths to regular files, each also in `tests`; list the files themselves, not directories. Absent or null means `[]`.
+  A `test*.py` support file or one loading unittest tests fails; an unloadable helper is a non-claim. At least one
+  runnable file is needed. An invalid context, a project context changed during the call, or a file outside its cwd is
+  not verified red; unittest errors quote their last traceback line and the context. Such red is for the runner that hired the member to verify itself. A missing feature
+  has to show as a failed assertion — an `AssertionError` (or a subclass) raised in a test body: a test that imports a
+  module not yet written errors, an error is not red, and a TestCase that widens `failureException` beyond
+  `AssertionError` does not turn another exception into one (that failure counts as an error). The
+  gate guards against a vacuous red, not a hostile test: code in the test file runs inside the harness, and a file that
+  hangs hangs the call. Releases up to 1.12.1 counted any non-zero exit as red; answers they validated are not
+  re-labelled.
+- Four domains shipped: `code`; `refactor` (placement changes, behavior and explanation do not: the runner compares
+  the project's public names, docstrings and comment lines with HEAD and refuses a builder's answer where any shrank —
+  `explanation-kept`; the nitpicker adds no placement tests; the eyes are told to look for words the diff removed and
+  did not put back); `site` (a static site: the author follows the README and builds, the visitor reads the generated
+  pages — 초짜 does both in a scratch copy, so the project is never touched); and `plan` (the artifact is the plan
+  document itself: 닥돌 writes sections with acceptance sentences, 시비 quarrels with sentences that leave two readings or
+  promise the unrequested, 트집 writes counter-examples, 초짜 reads it as the person who asked — for intent, not form; a
+  plan still deciding has no slices yet, and a question answered by a survey is a `findings:` section carrying sources
+  instead of acceptance sentences). A member sent at a domain
+  with no text works from its role alone and says so.
+- The prompt says where the session runs (`# Where you run`): a Codex `workspace-write` sandbox has no network by default
+  and a read-only `.git`; a Claude Code session has the member's tools only (a `--prompt-only` prompt says instead that
+  the parent host decides). What the work needs and that place lacks is
+  `blocked`, named — never a hand-written lock file or another tool in the named one's place.
+- **What a member can do, and what a task needs.** Each host has a default — Codex: no network, no loopback (a Codex
+  sandbox cannot bind a local port: a local server, `wrangler dev`, a fake S3 on 127.0.0.1); Claude Code: both — and a
+  member's `policy.json` may say otherwise with `"can": {"network": true|false, "loopback": true|false}` (only those two
+  names; another is refused at load). The prompt states both. A request may carry `"needs": ["loopback", "network"]`
+  (chongdae passes a plan task's `needs`); a need the member cannot meet on this host — or one this runner does not know —
+  is answered `blocked` at once, with the reason in `non-claims` and no host call: give the task to a member that has it,
+  or to the session. `roster` shows each member's capabilities per host.
+- **A lack found mid-task is said as one.** A task that did not declare `needs` learns it during the call. After the
+  call the runner reads each shell command's output in the session's stream (codex `command_execution`, Claude Code
+  Bash `tool_result`) for a refusal of a capability this member lacks on this host — loopback: `listen EPERM`/`EACCES`
+  (wrangler, workerd), `connect EPERM 127.0.0.1`, a Python `PermissionError: [Errno 1] Operation not permitted` right
+  after a `.bind(`/`.listen(`; network: `getaddrinfo ENOTFOUND <host>` (npm), `Could not resolve host:` (curl, git),
+  `Temporary failure in name resolution`, `nodename nor servname provided`, `Network is unreachable`. It adds
+  `"lacked": ["loopback"|"network"]` and a non-claim starting `sandbox lacked: ` naming the capability, the member, the
+  host, the command and the quoted line — chongdae routes it as a hiring stop, not as a decision the contract left open.
+  The status is the member's, except `done` becomes `blocked` when the refused command was part of its job (a request
+  check, a `verified` check, one of its tests). Conservative: an EPERM on a file (a log, a cache, a temp file), a test
+  that simply failed, text printed by a reader (`cat`, `sed`, `rg` …), and anything on a host that has the capability are
+  left alone. A member that never ran the command — the prompt told it there is no port — says so itself: the prompt asks
+  for `lacked`, not only prose, and the runner merges the member's `lacked` with what the transcript shows, adding the
+  same `sandbox lacked: ` non-claim named as the member's word, not observed (`done` with a `lacked` is `blocked`).
+- A member's session is a fresh process, but not an empty one: on Claude Code it receives the project's SessionStart
+  modes (every enabled plugin's hook runs; `--setting-sources ""` does not keep them out, and the flag that would
+  cannot stay logged in). A mode written for the person's session — "leave the code for the user to write" — reaches
+  the builder too. hacheong does not filter modes; hunsu's judge reads each mode's injected text beside each member's
+  prompt (`--prompt-only`), so the contradiction is found before a worker is hired, and the project's resolution
+  decides.
+- 닥돌 does not bend code to pass a contract test that contradicts the contract: it stops `blocked` with
+  `disputed-tests` (the test, the contract sentence quoted, why), and a runner sends the dispute back to the test's
+  writer. 트집 given a request with `amending` corrects the disputed tests to the contract (or keeps one and quotes
+  why); `red-before-build` is waived there, since the build already stands.
+- A validator sees the transcript, not the model's mind: `readme-only` catches reads it can see (tool calls,
+  `cat`/`grep`/… in shell), not a model that already knew the code.
+- chongdae hires these around a task: `add … --before quibble --after newbie` (or `before`/`after` on a plan task,
+  `stages` on a plan). A `before` role's findings hold the task until a human accepts them; an `after` role's go to
+  the record. `nitpick` is not a stage: 트집 is a task of its own (`add tests --role nitpick --tests …`), since its
+  output is the contract's tests.
+
+- `worker.py` starts its host session through `hostcall.py` — one host call for every worker of this family (hunsu's judge, mangsang's judge, dwitbuk's eyes,
+  hacheong's members), vendored: the same file in each plugin, since a plugin imports no other plugin. The umbrella checkout's `tools/same-file.py` says when the copies drift.
+  A child host starts without exactly seven variables this family reads for host and session attribution
+  (`CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CHONGDAE_SESSION`, `AI_AGENT`, `CLAUDE_PROJECT_DIR`,
+  `CODEX_VERSION`), with `AGENT_HOST` naming its own host and `AGENT_WORKER=1`. Every other variable — configuration,
+  credentials and other metadata — passes through on purpose; this is not a promise that every variable that looks like
+  an identity is removed (`CODEX_TOOL_CALL_ID` and `CODEX_CI`, which nothing in this family reads, are kept). The
+  self-check shows it with `subprocess.run` mocked. This `hostcall.py` (sha256 `e0404678…`) was run from a disposable
+  copy against the real Claude Code and Codex CLIs with a synthetic parent `CODEX_SESSION_ID`: the Claude child had no
+  `CODEX_SESSION_ID` and its own session id, the Codex child's `CODEX_SESSION_ID` was its own thread id, both had their
+  own `AGENT_HOST` and `AGENT_WORKER=1` and kept a near-miss name; the earlier copy, run the same way, handed the Claude
+  child the parent's value. Before that, the earlier copy (sha256 `fa06077c…`, which removed six and kept
+  `CODEX_SESSION_ID`) was run once against both CLIs in a disposable fixture: the parent's six markers were gone,
+  `AGENT_HOST` and `AGENT_WORKER` were the child's, each CLI set its own session ids, the fixture was unchanged. That
+  shows the adapter in real CLI environments — not an installed plugin, project hooks, a release or its adoption.
+
+- **A tree check judges the member, not the tree.** `only-tests-touched` holds against a member only the files its own
+  transcript shows it wrote, or names in commands where a read cannot be told from a write (said with a command quote).
+  A write wins over an unclear mention, which wins over a read. A reader with a switch or script part that can write or
+  execute — sed in place in any spelling, `sed -f`/`e`/`w`, `rg --pre`, `git … --output`, `less -o` — is never a read. A
+  file named only in proved simple reads is a non-claim: only read evidence was observed, and write ownership was not
+  established. A file the transcript never names is presumed another hand's (the session writing code beside a tests
+  worker) and is said as 2.0.1's non-claim, not held against the member. Both are transcript evidence, not a guarantee
+  about who wrote a file: a member's write its transcript does not name (a script that computes the path) is not seen.
+  No transcript: strict, as before. `red-before-build` cannot decide a test that passes
+  when code was already changed and uncommitted before the call began (an earlier build attempt): it says so instead of
+  failing the answer.
+- **A contract that retires a feature retires its tests.** The tests writer deletes them, and a declared test it deleted
+  is that change, not a missing test (guin-site Q-cleanup: four retired files refused a finished tests task four times as
+  "does not exist"). The build request names them in `deleted-tests`; `tests-kept` holds them deleted.
+- **What a tree check leaves out** (`no-tree-changes`, `only-tests-touched`, `explanation-kept`) — the products' records —
+  comes from the lock's `record-paths` (each plugin's `records` declaration); without it, the names as they were.
+  `.chongdae/` and the five hunsu files (`hunsu.json`, `hunsu.lock.json`, `hunsu-judgments.json`, `hunsu-conflicts.md`,
+  `hunsu.local.json`) are always records. Paths are taken from the project root: an entry ending in `/` is that
+  directory — its own path and everything under it, not `reviews-old` beside `reviews/` — and any other entry is exactly
+  that file, never a directory or a prefix: `hunsu.py` beside `hunsu.json` is the project's.
+- `tests-kept` snapshots each requested test's contents immediately before the host call and compares them after it.
+  Committing a modified test, putting it in an ignored nested repository, or working without git does not hide a change.
+  Requested tests under record paths are protected too. `no-tree-changes` and `only-tests-touched` still compare git-status
+  snapshots; `explanation-kept` compares the current Python inventory with HEAD. The content snapshot protects the
+  request's tests specifically.
+
+## Versioning
+
+Semver, and a version names one content: every change to the source — code, role text, this README — bumps the version
+in all three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and the marketplace
+entries before it is used anywhere. **patch**: behavior or wording, every interface unchanged. **minor**: a new
+member, field, validator or domain; what exists keeps working. **major**: the request, the envelope, or `worker`
+changes shape — or a supported Python or host version is dropped. 2.0.0 is such a release: it raised the manifests'
+floor to `python >=3.11`, dropping 3.9 and 3.10.
+
+The self-check suites and release steps live in the source repository, not in the installed plugin.

@@ -19,8 +19,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.join(ROOT, "plugin")
+sys.path.insert(0, PLUGIN)
 import worker  # noqa: E402
 
 REQUEST = {"artifact-type": "chongdae/request@1", "stage": "build", "run": "run-1", "task": "T1", "role": "nitpick", "target": ".",
@@ -636,7 +637,7 @@ class S1Answer(Base):
         self.assertFalse(any(n.startswith("support (") for n in self.notes(out)), out)
 
     def test_S1_teujips_schema_lists_support_in_properties_and_required(self):
-        with open(os.path.join(HERE, "members", "teujip", "answer.json"), encoding="utf-8") as fh:
+        with open(os.path.join(PLUGIN, "members", "teujip", "answer.json"), encoding="utf-8") as fh:
             schema = json.load(fh)
         self.assertIn("support", schema.get("properties", {}))
         self.assertIn("support", schema.get("required", []))

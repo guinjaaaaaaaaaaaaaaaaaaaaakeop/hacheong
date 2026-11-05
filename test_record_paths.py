@@ -13,8 +13,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.join(ROOT, "plugin")
+sys.path.insert(0, PLUGIN)
 import worker  # noqa: E402
 
 ENV = ("hunsu.json", "hunsu.lock.json", "hunsu-judgments.json", "hunsu-conflicts.md", "hunsu.local.json")
@@ -561,9 +562,9 @@ SIBLINGS = {"chongdae", "hunsu", "mangsang", "dwitbuk", "jokbo", "dakdol", "deom
 
 class R7NothingElse(unittest.TestCase):
     def test_R7_worker_imports_nothing_from_a_sibling_plugin(self):
-        with open(os.path.join(HERE, "worker.py"), encoding="utf-8") as fh:
+        with open(os.path.join(PLUGIN, "worker.py"), encoding="utf-8") as fh:
             tree = ast.parse(fh.read())
-        local = {os.path.splitext(f)[0] for f in os.listdir(HERE) if f.endswith(".py")}
+        local = {os.path.splitext(f)[0] for f in os.listdir(PLUGIN) if f.endswith(".py")}
         stdlib = set(getattr(sys, "stdlib_module_names", ()))
         for node in ast.walk(tree):
             mods = []
@@ -581,7 +582,7 @@ class R7NothingElse(unittest.TestCase):
     def test_R7_the_other_self_checks_keep_passing(self):
         for f in ("test_native_prompt.py", "test_hostcall_env.py"):
             with self.subTest(f=f):
-                done = subprocess.run([sys.executable, "-m", "unittest", f], cwd=HERE, capture_output=True, text=True)
+                done = subprocess.run([sys.executable, "-m", "unittest", f], cwd=ROOT, capture_output=True, text=True)
                 self.assertEqual(done.returncode, 0, done.stderr[-2000:])
 
 

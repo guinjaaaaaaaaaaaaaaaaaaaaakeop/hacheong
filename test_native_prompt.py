@@ -12,8 +12,9 @@ import sys
 import tempfile
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.join(ROOT, "plugin")
+sys.path.insert(0, PLUGIN)
 import worker  # noqa: E402
 
 MEMBERS = ("dakdol", "sibi", "teujip", "chojja")
@@ -110,7 +111,7 @@ class Fixture(unittest.TestCase):
 
     def prompt_only(self, member, req_path, host=None, env=None):
         response = os.path.join(self.dir, "resp-%s-%s.json" % (member.replace("/", "_"), host))
-        argv = [sys.executable, os.path.join(HERE, "worker.py"), "--member", member, "--request", req_path, "--response", response, "--prompt-only"]
+        argv = [sys.executable, os.path.join(PLUGIN, "worker.py"), "--member", member, "--request", req_path, "--response", response, "--prompt-only"]
         if host:
             argv += ["--host", host]
         e = dict(os.environ)
@@ -123,7 +124,7 @@ class Fixture(unittest.TestCase):
     def local_member(self, base, policy):
         """A project-local copy of a shipped member with its own policy.json."""
         d = os.path.join(self.repo, "hacheong", "members", base)
-        shutil.copytree(os.path.join(HERE, "members", base), d)
+        shutil.copytree(os.path.join(PLUGIN, "members", base), d)
         with open(os.path.join(d, "policy.json"), "w", encoding="utf-8") as fh:
             json.dump(policy, fh)
         return d

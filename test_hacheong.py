@@ -13,8 +13,9 @@ import subprocess
 import sys
 import tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.join(ROOT, "plugin")
+sys.path.insert(0, PLUGIN)
 import worker as w  # noqa: E402
 import hacheong as h  # noqa: E402
 
@@ -67,11 +68,11 @@ class Skip(Exception):
 def test_every_shipped_member_loads_and_the_roster_matches_the_roles():
     roles = h.declared_roles()
     assert roles == {"build": "dakdol", "quibble": "sibi", "nitpick": "teujip", "newbie": "chojja"}, roles
-    for m in h.members_in(os.path.join(HERE, "members") and __import__("pathlib").Path(HERE) / "members"):
+    for m in h.members_in(os.path.join(PLUGIN, "members") and __import__("pathlib").Path(PLUGIN) / "members"):
         mem = w.load_member(m)
         assert mem["schema"]["required"][:3] == ["status", "summary", "non-claims"] or set(("status", "summary", "non-claims")) <= set(mem["schema"]["required"]), m
         assert set(mem["policy"]) <= w.POLICY_KEYS
-    assert h.problems_of(__import__("pathlib").Path(HERE) / "members", roles) == []
+    assert h.problems_of(__import__("pathlib").Path(PLUGIN) / "members", roles) == []
 
 
 def test_the_prompt_is_role_then_domain_section_then_request():
@@ -497,11 +498,11 @@ def test_prompt_only_prints_the_prompt_and_the_schema_without_a_host():
         req = os.path.join(r.dir, "req.json")
         with open(req, "w") as fh:
             json.dump(dict(REQUEST, target=r.dir), fh)
-        done = subprocess.run([sys.executable, os.path.join(HERE, "worker.py"), "--member", "chojja", "--request", req, "--response", os.path.join(r.dir, "r.json"), "--prompt-only"],
+        done = subprocess.run([sys.executable, os.path.join(PLUGIN, "worker.py"), "--member", "chojja", "--request", req, "--response", os.path.join(r.dir, "r.json"), "--prompt-only"],
                               capture_output=True, text=True, encoding="utf-8")
         assert done.returncode == 0 and "초짜 (chojja)" in done.stdout and "## chojja" in done.stdout and '"tried"' in done.stdout and "# Answer" in done.stdout, done.stdout[-500:] + done.stderr
         assert not os.path.exists(os.path.join(r.dir, "r.json"))
-        done = subprocess.run([sys.executable, os.path.join(HERE, "worker.py"), "--member", "chojja", "--request", os.path.join(r.dir, "README.md"), "--response", "x"], capture_output=True, text=True)
+        done = subprocess.run([sys.executable, os.path.join(PLUGIN, "worker.py"), "--member", "chojja", "--request", os.path.join(r.dir, "README.md"), "--response", "x"], capture_output=True, text=True)
         assert done.returncode != 0
 
 
@@ -521,7 +522,7 @@ def test_a_request_that_needs_what_the_sandbox_lacks_is_refused_before_any_call(
     with Repo() as r:
         # a policy may say more than the host's default — and only about capabilities this runner knows
         d = os.path.join(r.dir, "members", "local")
-        shutil.copytree(os.path.join(HERE, "members", "dakdol"), d)
+        shutil.copytree(os.path.join(PLUGIN, "members", "dakdol"), d)
         pol = json.load(open(os.path.join(d, "policy.json")))
         json.dump(dict(pol, can={"loopback": True}), open(os.path.join(d, "policy.json"), "w"))
         assert w.missing_needs({"needs": ["loopback"]}, w.load_member(d), "codex") == []
@@ -536,7 +537,7 @@ def test_a_request_that_needs_what_the_sandbox_lacks_is_refused_before_any_call(
         json.dump(dict(REQUEST, target=r.dir, needs=["loopback"]), open(req, "w"))
         resp = os.path.join(r.dir, "resp.json")
         env = dict(os.environ, PATH="/nonexistent")   # no codex binary reachable: a call would fail, not block
-        done = subprocess.run([sys.executable, os.path.join(HERE, "worker.py"), "--member", "dakdol", "--request", req, "--response", resp, "--host", "codex"],
+        done = subprocess.run([sys.executable, os.path.join(PLUGIN, "worker.py"), "--member", "dakdol", "--request", req, "--response", resp, "--host", "codex"],
                               capture_output=True, text=True, encoding="utf-8", env=env)
         assert done.returncode == 0, done.stderr
         out = json.load(open(resp))
@@ -660,7 +661,7 @@ def test_a_sandbox_refusal_mid_task_is_said_as_lacked_not_left_to_prose():
     # network, claude format, on a member whose policy says it has none: curl cannot resolve a host
     with Repo() as r:
         d = os.path.join(r.dir, "members", "offline")
-        shutil.copytree(os.path.join(HERE, "members", "dakdol"), d)
+        shutil.copytree(os.path.join(PLUGIN, "members", "dakdol"), d)
         pol = json.load(open(os.path.join(d, "policy.json")))
         json.dump(dict(pol, can={"network": False}), open(os.path.join(d, "policy.json"), "w"))
         offline = w.load_member(d)
@@ -687,7 +688,7 @@ def test_a_local_failure_or_a_host_that_can_is_left_alone():
     # and a member whose policy grants loopback on codex is not flagged for it either
     with Repo() as r:
         d = os.path.join(r.dir, "members", "local")
-        shutil.copytree(os.path.join(HERE, "members", "teujip"), d)
+        shutil.copytree(os.path.join(PLUGIN, "members", "teujip"), d)
         pol = json.load(open(os.path.join(d, "policy.json")))
         json.dump(dict(pol, can={"loopback": True}), open(os.path.join(d, "policy.json"), "w"))
         out = w.mark_lacked(good(), w.load_member(d), dict(REQUEST), codex_stream(("python3 -m unittest tests/test_x.py", WRANGLER_LISTEN, 1)), "codex")

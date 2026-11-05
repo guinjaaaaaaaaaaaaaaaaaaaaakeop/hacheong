@@ -12,8 +12,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.join(ROOT, "plugin")
+sys.path.insert(0, PLUGIN)
 import hostcall  # noqa: E402
 
 IDENTITY = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CHONGDAE_SESSION", "AI_AGENT", "CLAUDE_PROJECT_DIR", "CODEX_VERSION")
@@ -161,7 +162,7 @@ class H1WorkerEnv(Base):
 
     def test_H1_self_contained_no_plugin_or_worker_import(self):
         self.assertTrue(callable(getattr(hostcall, "worker_env", None)), "hostcall.worker_env is missing")
-        with open(os.path.join(HERE, "hostcall.py"), encoding="utf-8") as f:
+        with open(os.path.join(PLUGIN, "hostcall.py"), encoding="utf-8") as f:
             tree = ast.parse(f.read())
         stdlib = set(getattr(sys, "stdlib_module_names", ())) or {"json", "os", "re", "shutil", "subprocess", "tempfile", "pathlib"}
         for node in ast.walk(tree):

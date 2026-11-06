@@ -345,8 +345,8 @@ class G3Fixtures(Gate):
             self.assertVerdict("unverified", "import os, unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n"
                                "        self.fail('x')\n    def test_b(self):\n        os._exit(%s)\n" % code)
 
-    def test_G3_functions_only_module_is_unverified(self):
-        self.assertVerdict("unverified", "def test_Q_add():\n    assert 1 == 2\n")
+    def test_G3_F9_functions_only_module_failing_an_assertion_is_red_and_no_tests_is_unverified(self):
+        self.assertVerdict("red", "def test_Q_add():\n    assert 1 == 2\n")
         self.assertVerdict("unverified", HEAD)
 
     def test_G3_direct_script_is_unverified(self):
@@ -746,6 +746,753 @@ class G10OnlyAssertionErrors(Gate):
 
     def test_G10_a_passing_file_with_a_broad_failure_exception_is_still_green(self):
         self.assertVerdict("green", BROAD + "    def test_Q_add(self):\n        self.assertEqual(1, 1)\n")
+
+
+
+# Contract HC1: module-level test_* functions the file itself defines, callable with no arguments, are collected as unittest tests.
+FN_RED = "def test_Q_add():\n    assert 1 == 2, 'not built'\n"
+FN_GREEN = "def test_Q_ok():\n    assert 1 == 1\n"
+NO_TESTS_RAN = "no tests ran"
+
+
+class G11Functions(Gate):
+    """unittest_red on function-style fixture files in temporary directories."""
+
+    def marker(self):
+        return os.path.join(self.tmp(), "ran")
+
+    def marking(self, path, name="test_Q_mark"):
+        return "def %s():\n    open(%r, 'w').write('x')\n" % (name, path)
+
+    def assertErrorVerdict(self, text, rel="tests/test_x.py", files=None):
+        verdict, detail = self.assertVerdict("unverified", text, rel, files)
+        self.assertNotIn(NO_TESTS_RAN, detail, "the functions were not run: %s\n--- fixture ---\n%s" % (detail, text))
+        return verdict, detail
+
+    # F2 red
+    def test_F2_bare_assert_in_a_function_is_red(self):
+        self.assertVerdict("red", FN_RED)
+
+    def test_F2_raise_assertion_error_in_a_function_is_red(self):
+        self.assertVerdict("red", "def test_Q_add():\n    raise AssertionError('not built')\n")
+
+    def test_F2_assertion_error_subclass_in_a_function_is_red(self):
+        self.assertVerdict("red", "class Mismatch(AssertionError):\n    pass\n\ndef test_Q_add():\n    raise Mismatch('not built')\n")
+
+    def test_F2_assertion_in_a_same_file_helper_the_function_calls_is_red(self):
+        self.assertVerdict("red", "def check(x):\n    assert x, 'missing'\n\ndef test_Q_add():\n    check(False)\n")
+
+    def test_F2_red_beside_passing_functions_is_red(self):
+        self.assertVerdict("red", FN_GREEN + FN_RED + "def test_Q_more():\n    pass\n")
+
+    def test_F2_function_with_only_defaulted_and_star_parameters_is_collected(self):
+        self.assertVerdict("red", "def test_Q_add(x=1, *args, **kwargs):\n    assert x == 2\n")
+        self.assertVerdict("red", "def test_Q_add(*args, **kwargs):\n    assert args == (1,)\n")
+        self.assertVerdict("red", "def test_Q_add(*, flag=False):\n    assert flag\n")
+
+    # F4 green
+    def test_F4_all_passing_functions_are_green(self):
+        self.assertVerdict("green", FN_GREEN + "def test_Q_more():\n    assert [1] == [1]\n")
+
+    def test_F4_a_function_printing_failed_and_returning_is_green(self):
+        fake = json.dumps(report(tests_run=1, assertion_failures=1))
+        self.assertVerdict("green", "import os, sys\n\ndef test_Q_add():\n"
+                           "    msg = 'FAIL: test_Q_add\\nAssertionError\\nFAILED (failures=1)\\n' + %r + '\\n'\n"
+                           "    print(msg); sys.stderr.write(msg); os.write(1, msg.encode()); os.write(2, msg.encode())\n" % fake)
+
+    def test_F4_the_files_own_main_runner_exiting_1_is_not_the_verdict(self):
+        self.assertVerdict("green", "import sys\n\n" + FN_GREEN +
+                           "\nif __name__ == '__main__':\n    print('FAILED (failures=1)')\n    sys.exit(1)\n")
+
+    def test_F4_the_files_own_main_runner_exiting_0_does_not_hide_red(self):
+        self.assertVerdict("red", "import sys\n\n" + FN_RED +
+                           "\nif __name__ == '__main__':\n    print('OK')\n    sys.exit(0)\n")
+
+    # F3 error
+    def test_F3_name_error_beside_a_red_function_is_unverified(self):
+        self.assertErrorVerdict(FN_RED + "def test_Q_other():\n    add(1)\n")
+
+    def test_F3_import_of_a_missing_module_inside_the_body_is_unverified(self):
+        self.assertErrorVerdict(FN_RED + "def test_Q_other():\n    import app_not_built_q\n")
+
+    def test_F3_runtime_error_beside_a_red_function_is_unverified(self):
+        self.assertErrorVerdict(FN_RED + "def test_Q_other():\n    raise RuntimeError('x')\n")
+
+    def test_F3_other_exceptions_beside_a_red_function_are_unverified(self):
+        for body in ("1 / 0", "{}['k']", "None.missing", "raise ValueError('v')"):
+            with self.subTest(body=body):
+                self.assertErrorVerdict(FN_RED + "def test_Q_other():\n    %s\n" % body)
+
+    def test_F3_a_suites_own_skip_exception_is_an_error(self):
+        self.assertErrorVerdict("class Skip(Exception):\n    pass\n\n" + FN_RED + "def test_Q_later():\n    raise Skip('later')\n")
+
+    def test_F3_sys_exit_in_a_function_is_unverified(self):
+        for code in ("", "0", "1", "'bye'"):
+            with self.subTest(code=code):
+                self.assertErrorVerdict("import sys\n\n" + FN_RED + "def test_Q_exit():\n    sys.exit(%s)\n" % code)
+
+    def test_F3_an_erroring_function_beside_a_testcase_assertion_failure_is_unverified(self):
+        self.assertVerdict("unverified", RED_FAIL + "\ndef test_Q_other():\n    raise RuntimeError('x')\n")
+
+    def test_F3_os_exit_in_a_function_leaves_no_report(self):
+        for code in ("0", "1"):
+            with self.subTest(code=code):
+                self.assertErrorVerdict("import os\n\n" + FN_RED + "def test_Q_exit():\n    os._exit(%s)\n" % code)
+
+    # F6 mixed
+    def test_F6_testcase_failure_with_passing_functions_is_red_and_both_run(self):
+        m = self.marker()
+        self.assertVerdict("red", RED_FAIL + "\n" + self.marking(m))
+        self.assertTrue(os.path.exists(m), "the function did not run")
+
+    def test_F6_passing_testcases_with_a_function_assertion_failure_is_red(self):
+        self.assertVerdict("red", GREEN + "\n" + FN_RED)
+
+    def test_F6_testcase_error_with_passing_functions_is_unverified_and_both_run(self):
+        m = self.marker()
+        self.assertVerdict("unverified", HEAD + "class T(unittest.TestCase):\n    def test_Q_add(self):\n        1 / 0\n\n" + self.marking(m))
+        self.assertTrue(os.path.exists(m), "the function did not run")
+
+    def test_F6_passing_testcases_with_an_erroring_function_is_unverified(self):
+        self.assertVerdict("unverified", GREEN + "\ndef test_Q_other():\n    raise KeyError('k')\n")
+
+    def test_F6_function_failure_with_a_testcase_error_is_unverified_and_both_run(self):
+        m = self.marker()
+        self.assertVerdict("unverified", HEAD + "class T(unittest.TestCase):\n    def test_Q_add(self):\n        raise OSError('x')\n\n"
+                           "def test_Q_fn():\n    open(%r, 'w').write('x')\n    assert False\n" % m)
+        self.assertTrue(os.path.exists(m), "the function did not run")
+
+    def test_F6_all_passing_is_green_and_both_run(self):
+        m = self.marker()
+        self.assertVerdict("green", GREEN + "\n" + self.marking(m))
+        self.assertTrue(os.path.exists(m), "the function did not run")
+
+    def test_F6_setupmodule_raising_makes_a_function_only_file_unverified(self):
+        self.assertErrorVerdict("def setUpModule():\n    raise RuntimeError('x')\n\n" + FN_RED)
+
+    def test_F6_setupmodule_runs_before_functions(self):
+        self.assertVerdict("red", "STATE = {}\n\ndef setUpModule():\n    STATE['k'] = 1\n\n"
+                           "def test_Q_uses():\n    STATE['k']\n\n" + FN_RED)
+
+    # F1 / F7 what is collected
+    HELPER = ("def test_x():\n    assert False, 'imported red'\n\n"
+              "def test_z():\n    raise RuntimeError('imported error')\n\n"
+              "def test_w():\n    assert False, 'imported by assignment'\n")
+
+    def test_F1_imported_red_or_erroring_functions_are_not_collected(self):
+        files = {"helper_fx.py": self.HELPER}
+        self.assertVerdict("green", "from helper_fx import test_x\n\n" + FN_GREEN, files=files)
+        self.assertVerdict("green", "import helper_fx\ntest_y = helper_fx.test_z\n\n" + FN_GREEN, files=files)
+        self.assertVerdict("green", "from helper_fx import test_x, test_z\nimport helper_fx\ntest_v = helper_fx.test_w\n\n" + FN_GREEN,
+                           files=files)
+
+    def test_F1_imported_functions_do_not_hide_an_own_red_function(self):
+        self.assertVerdict("red", "from helper_fx import test_x\n\n" + FN_RED, files={"helper_fx.py": self.HELPER})
+
+    def test_F7_a_file_whose_only_test_function_is_imported_has_no_tests(self):
+        verdict, detail = self.assertVerdict("unverified", "from helper_fx import test_x\nimport helper_fx\ntest_y = helper_fx.test_z\n",
+                                             rel="checks/probe.py", files={"helper_fx.py": self.HELPER})
+        for word in ("unittest", "TestCase", "test_"):
+            self.assertIn(word, detail)
+
+    def test_F1_a_function_needing_arguments_is_not_collected(self):
+        self.assertVerdict("red", FN_RED + "def test_needs(tmp_path):\n    raise RuntimeError(tmp_path)\n")
+        self.assertVerdict("red", FN_RED + "def test_kw(a, *, b):\n    raise RuntimeError(a)\n")
+        self.assertVerdict("red", FN_RED + "def test_kwonly(*, b):\n    raise RuntimeError(b)\n")
+
+    def test_F1_a_file_with_only_argument_needing_functions_has_no_tests(self):
+        verdict, detail = self.assertVerdict("unverified", "def test_needs(tmp_path):\n    assert False\n\n"
+                                             "def test_kw(a, *, b):\n    assert False\n", rel="checks/probe.py")
+        self.assertIn("test_", detail)
+
+    def test_F1_a_class_or_callable_object_named_test_is_not_collected(self):
+        self.assertVerdict("green", "class test_thing:\n    def __init__(self):\n        raise AssertionError('class')\n\n" + FN_GREEN)
+        self.assertVerdict("green", "class Boom:\n    def __call__(self):\n        raise AssertionError('callable')\n\n"
+                           "test_obj = Boom()\n\n" + FN_GREEN)
+        self.assertVerdict("green", "import functools\n\ndef boom():\n    raise RuntimeError('partial')\n\n"
+                           "test_partial = functools.partial(boom)\n\n" + FN_GREEN)
+
+    def test_F1_nested_functions_are_not_collected(self):
+        self.assertVerdict("green", "class Holder:\n    @staticmethod\n    def test_static():\n        raise AssertionError('in a class')\n\n"
+                           "def outer():\n    def test_inner():\n        raise AssertionError('nested')\n    return test_inner\n\n" + FN_GREEN)
+
+    def test_F1_functions_not_named_test_underscore_are_not_collected(self):
+        self.assertVerdict("green", "def check_q():\n    raise AssertionError('x')\n\n"
+                           "def testq():\n    raise AssertionError('x')\n\n"
+                           "def Test_q():\n    raise RuntimeError('x')\n\n"
+                           "def tests_q():\n    raise AssertionError('x')\n\n" + FN_GREEN)
+
+    def test_F1_load_tests_decides_and_no_function_is_added(self):
+        m = self.marker()
+        body = (self.marking(m, "test_Q_fn") + FN_RED)
+        self.assertVerdict("red", body)   # without load_tests the functions are collected
+        m2 = self.marker()
+        self.assertVerdict("green", HEAD + "class T(unittest.TestCase):\n    def test_Q_ok(self):\n        pass\n\n"
+                           "def load_tests(loader, tests, pattern):\n    return unittest.TestSuite([T('test_Q_ok')])\n\n"
+                           + self.marking(m2, "test_Q_fn") + FN_RED)
+        self.assertFalse(os.path.exists(m2), "a function was added to what load_tests returned")
+
+    # F5 skip and expected failure
+    def test_F5_skiptest_raised_in_a_function_is_skipped(self):
+        self.assertVerdict("green", "import unittest\n\ndef test_Q_add():\n    raise unittest.SkipTest('later')\n\n" + FN_GREEN)
+
+    def test_F5_skip_decorators_on_functions_skip(self):
+        self.assertVerdict("green", HEAD + "\n@unittest.skip('later')\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN)
+        self.assertVerdict("green", HEAD + "\n@unittest.skipIf(True, 'later')\ndef test_Q_add():\n    raise RuntimeError('x')\n\n" + FN_GREEN)
+
+    def test_F5_skipif_false_runs_the_function(self):
+        self.assertVerdict("red", HEAD + "\n@unittest.skipIf(False, 'runs')\ndef test_Q_add():\n    assert False\n")
+
+    def test_F5_expected_failure_on_a_function_is_not_red(self):
+        self.assertVerdict("green", HEAD + "\n@unittest.expectedFailure\ndef test_Q_add():\n    assert False\n")
+        self.assertVerdict("green", HEAD + "\n@unittest.expectedFailure\ndef test_Q_add():\n    pass\n\n" + FN_GREEN)
+
+    # F7 no tests
+    def test_F7_no_tests_detail_names_unittest_testcase_and_test_(self):
+        for r in (report(), report(skipped=1), report(assertion_failures=1)):
+            verdict, detail = self.shape(self.fn("red_verdict")(r))
+            self.assertEqual(verdict, "unverified", r)
+            for word in ("unittest", "TestCase", "test_"):
+                self.assertIn(word, detail, r)
+
+    def test_F7_a_file_with_no_testcase_and_no_function_is_unverified(self):
+        verdict, detail = self.assertVerdict("unverified", "import unittest\nVALUE = 1\n\ndef helper():\n    assert False\n",
+                                             rel="checks/probe.py")
+        self.assertIn("test_", detail)
+
+
+    # F10 a collected function whose call returns a coroutine, generator or async generator never ran its body
+    ASYNC_ONLY = "async def test_Q_add():\n    assert 1 == 2, 'not built'\n"
+
+    def assertNeverRan(self, text, marker=None):
+        verdict, detail = self.assertVerdict("unverified", text)
+        self.assertNotIn(NO_TESTS_RAN, detail, "the functions were not collected: %s\n--- fixture ---\n%s" % (detail, text))
+        self.assertIn("never ran", detail, "the detail does not say the body never ran: %s\n--- fixture ---\n%s" % (detail, text))
+        if marker is not None:
+            self.assertFalse(os.path.exists(marker), "the body ran")
+        return verdict, detail
+
+    def test_F10_an_async_only_file_is_unverified_and_never_ran(self):
+        m = self.marker()
+        self.assertNeverRan(self.ASYNC_ONLY + "\nasync def test_Q_mark():\n    open(%r, 'w').write('x')\n" % m, m)
+
+    def test_F10_a_generator_only_file_is_unverified_and_never_ran(self):
+        for body in ("def test_Q_add():\n    assert 1 == 2, 'not built'\n    yield\n",
+                     "def test_Q_add():\n    yield 1\n",
+                     "async def test_Q_add():\n    assert 1 == 2, 'not built'\n    yield 1\n"):
+            with self.subTest(body=body):
+                self.assertNeverRan(body)
+
+    def test_F10_an_async_function_that_would_raise_an_error_beside_a_red_function_is_unverified(self):
+        self.assertNeverRan(FN_RED + "async def test_Q_other():\n    raise RuntimeError('x')\n")
+        self.assertNeverRan(FN_RED + "def test_Q_gen():\n    raise RuntimeError('x')\n    yield\n")
+
+    def test_F10_a_red_function_beside_an_async_one_that_would_fail_an_assertion_is_unverified(self):
+        self.assertNeverRan(FN_RED + "async def test_Q_other():\n    assert False, 'would fail'\n")
+        self.assertNeverRan(RED_FAIL + "\nasync def test_Q_other():\n    assert False, 'would fail'\n")
+
+    def test_F10_a_functools_wraps_wrapper_returning_a_coroutine_is_unverified(self):
+        self.assertNeverRan("import functools\n\ndef deco(f):\n    @functools.wraps(f)\n    def wrapper():\n        return f()\n"
+                            "    return wrapper\n\n@deco\nasync def test_Q_wrapped():\n    assert False, 'would fail'\n\n" + FN_RED)
+
+    def test_F10_a_function_returning_a_value_beside_a_red_function_stays_red(self):
+        for value in ("True", "1"):
+            with self.subTest(value=value):
+                self.assertVerdict("red", "def test_Q_value():\n    return %s\n\n" % value + FN_RED)
+
+    def test_F10_a_function_returning_a_value_with_nothing_failing_stays_green(self):
+        self.assertVerdict("green", "def test_Q_value():\n    return True\n\ndef test_Q_num():\n    return 1\n\n" + FN_GREEN)
+
+
+    # F11 a collected function whose body never ran is an error even under @unittest.expectedFailure
+    def test_F11_an_expected_failure_async_only_file_is_unverified_and_never_ran(self):
+        m = self.marker()
+        self.assertNeverRan(HEAD + "\n@unittest.expectedFailure\nasync def test_Q_add():\n    assert 1 == 2, 'not built'\n"
+                            "\n@unittest.expectedFailure\nasync def test_Q_mark():\n    open(%r, 'w').write('x')\n" % m, m)
+
+    def test_F11_an_expected_failure_generator_beside_a_red_function_is_unverified(self):
+        m = self.marker()
+        self.assertNeverRan(HEAD + "\n" + FN_RED + "\n@unittest.expectedFailure\ndef test_Q_gen():\n"
+                            "    open(%r, 'w').write('x')\n    assert False, 'would fail'\n    yield\n" % m, m)
+        self.assertNeverRan(RED_FAIL + "\n@unittest.expectedFailure\ndef test_Q_gen():\n    yield 1\n")
+
+    def test_F11_an_expected_failure_async_generator_is_unverified(self):
+        m = self.marker()
+        self.assertNeverRan(HEAD + "\n@unittest.expectedFailure\nasync def test_Q_agen():\n"
+                            "    open(%r, 'w').write('x')\n    assert False, 'would fail'\n    yield 1\n" % m, m)
+        self.assertNeverRan(HEAD + "\n" + FN_RED + "\n@unittest.expectedFailure\nasync def test_Q_agen():\n    yield 1\n")
+
+    def test_F11_an_expected_failure_flag_copied_by_functools_wraps_onto_an_async_function_is_unverified(self):
+        m = self.marker()
+        deco = ("import functools\nimport unittest\n\ndef deco(f):\n    @functools.wraps(f)\n    def wrapper():\n        return f()\n"
+                "    return wrapper\n\n")
+        self.assertNeverRan(deco + "@deco\n@unittest.expectedFailure\nasync def test_Q_wrapped():\n"
+                            "    open(%r, 'w').write('x')\n    assert False, 'would fail'\n" % m, m)
+        self.assertNeverRan(deco + "@deco\n@unittest.expectedFailure\nasync def test_Q_wrapped():\n    assert False, 'would fail'\n\n"
+                            + FN_RED)
+
+    def test_F11_an_expected_failure_sync_function_failing_an_assertion_stays_green(self):
+        self.assertVerdict("green", HEAD + "\n@unittest.expectedFailure\ndef test_Q_add():\n    assert False, 'expected'\n")
+        self.assertVerdict("green", HEAD + "\n@unittest.expectedFailure\ndef test_Q_add():\n    assert False, 'expected'\n\n" + FN_GREEN)
+
+
+    # F12 under @unittest.expectedFailure any exception is an expected failure — for a function as for a TestCase method
+    XFAIL_FN = HEAD + "\n@unittest.expectedFailure\ndef test_Q_other():\n    add(1)\n\n"
+    XFAIL_TC = HEAD + "class X(unittest.TestCase):\n    @unittest.expectedFailure\n    def test_Q_other(self):\n        add(1)\n\n"
+
+    def test_F12_an_expected_failure_function_raising_name_error_beside_a_red_function_is_red(self):
+        self.assertVerdict("red", self.XFAIL_FN + FN_RED)
+
+    def test_F12_an_expected_failure_function_raising_name_error_alone_is_green(self):
+        self.assertVerdict("green", self.XFAIL_FN)
+
+    def test_F12_an_expected_failure_testcase_method_raising_name_error_gives_the_same_verdicts(self):
+        self.assertVerdict("red", self.XFAIL_TC + FN_RED)
+        self.assertVerdict("green", self.XFAIL_TC)
+
+
+    # F13 the bound object's own signature decides whether a test_* function is collected
+    MOCK = "from unittest import mock\n\n"
+    WRAPS = ("import functools\n\ndef deco(f):\n    @functools.wraps(f)\n    def wrapper(*args, **kwargs):\n"
+             "        return f(*args, **kwargs)\n    return wrapper\n\n")
+
+    def test_F13_a_mock_patch_function_failing_an_assertion_alone_is_red(self):
+        self.assertVerdict("red", self.MOCK + "@mock.patch(\"os.getcwd\")\ndef test_Q_add(getcwd):\n    assert False\n")
+
+    def test_F13_a_mock_patch_function_failing_an_assertion_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.MOCK + "@mock.patch(\"os.getcwd\")\ndef test_Q_add(getcwd):\n    assert False\n\n" + FN_GREEN)
+
+    def test_F13_a_passing_mock_patch_function_beside_a_red_function_is_red(self):
+        self.assertVerdict("red", self.MOCK + "@mock.patch(\"os.getcwd\")\ndef test_Q_patched(getcwd):\n"
+                           "    import os\n    assert os.getcwd is getcwd\n\n" + FN_RED)
+
+    def test_F13_a_mock_patch_function_is_called_with_the_mock(self):
+        m = self.marker()
+        self.assertVerdict("red", self.MOCK + "@mock.patch(\"os.getcwd\")\ndef test_Q_patched(getcwd):\n"
+                           "    import os\n    if os.getcwd is getcwd:\n        open(%r, 'w').write('x')\n\n" % m + FN_RED)
+        self.assertTrue(os.path.exists(m), "the mock.patch-decorated function was not called with its mock")
+
+    def test_F13_a_wraps_wrapper_around_an_argument_needing_function_is_an_error_not_a_drop(self):
+        verdict, detail = self.assertErrorVerdict(self.WRAPS + "@deco\ndef test_Q_needs(tmp_path):\n    assert tmp_path\n\n" + FN_GREEN)
+        self.assertIn("TypeError", detail, "the TypeError is not reported: %s" % detail)
+
+    def test_F13_a_plain_argument_needing_function_beside_a_red_function_is_still_not_collected(self):
+        self.assertVerdict("red", "def test_Q_needs(tmp_path):\n    raise RuntimeError(tmp_path)\n\n" + FN_RED)
+
+
+    # F14 a module-level def/async def statement in the file's own source makes the bound object the file's own
+    DECO_FX = ("def deco(f):\n    def wrapper():\n        return f()\n    return wrapper\n\n"
+               "def deco_arg(f):\n    def wrapper(a):\n        return f()\n    return wrapper\n")
+    DECO_FILES = {"helper_fx.py": DECO_FX}
+    FROM_DECO = "from helper_fx import deco, deco_arg\n\n"
+
+    def test_F14_a_foreign_wrapper_without_wraps_failing_an_assertion_alone_is_red(self):
+        self.assertVerdict("red", self.FROM_DECO + "@deco\ndef test_Q_add():\n    assert False\n", files=self.DECO_FILES)
+
+    def test_F14_a_foreign_wrapper_without_wraps_failing_an_assertion_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.FROM_DECO + "@deco\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN, files=self.DECO_FILES)
+
+    def test_F14_a_foreign_wrapper_is_called_and_its_body_runs(self):
+        m = self.marker()
+        self.assertVerdict("red", self.FROM_DECO + "@deco\ndef test_Q_mark():\n    open(%r, 'w').write('x')\n\n" % m + FN_RED,
+                           files=self.DECO_FILES)
+        self.assertTrue(os.path.exists(m), "the function decorated by a foreign wrapper was not called")
+
+    def test_F14_a_foreign_wrapper_raising_an_error_is_an_error_not_a_drop(self):
+        self.assertErrorVerdict(self.FROM_DECO + "@deco\ndef test_Q_other():\n    raise RuntimeError('x')\n\n" + FN_RED,
+                                files=self.DECO_FILES)
+
+    def test_F14_functools_cache_on_a_function_failing_an_assertion_is_red(self):
+        self.assertVerdict("red", "import functools\n\n@functools.cache\ndef test_Q_add():\n    assert False\n")
+        self.assertVerdict("red", "import functools\n\n@functools.cache\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN)
+
+    def assertNeverRanWith(self, text, files, marker=None):
+        verdict, detail = self.assertVerdict("unverified", text, files=files)
+        self.assertNotIn(NO_TESTS_RAN, detail, "the functions were not collected: %s\n--- fixture ---\n%s" % (detail, text))
+        self.assertIn("never ran", detail, "the detail does not say the body never ran: %s\n--- fixture ---\n%s" % (detail, text))
+        if marker is not None:
+            self.assertFalse(os.path.exists(marker), "the body ran")
+
+    def test_F14_a_foreign_wrapper_around_an_async_function_is_unverified_and_never_ran(self):
+        m = self.marker()
+        self.assertNeverRanWith(self.FROM_DECO + "@deco\nasync def test_Q_add():\n    open(%r, 'w').write('x')\n    assert False\n" % m,
+                                self.DECO_FILES, m)
+        self.assertNeverRanWith(self.FROM_DECO + "@deco\nasync def test_Q_other():\n    assert False\n\n" + FN_RED, self.DECO_FILES)
+
+    def test_F14_a_foreign_wrapper_needing_an_argument_beside_a_red_function_is_not_collected(self):
+        self.assertVerdict("red", self.FROM_DECO + "@deco_arg\ndef test_Q_needs():\n    raise RuntimeError('x')\n\n" + FN_RED,
+                           files=self.DECO_FILES)
+
+    def test_F14_a_foreign_wrapper_needing_an_argument_alone_has_no_tests(self):
+        verdict, detail = self.assertVerdict("unverified", self.FROM_DECO + "@deco_arg\ndef test_Q_needs():\n    assert False\n",
+                                             rel="checks/probe.py", files=self.DECO_FILES)
+        for word in ("unittest", "TestCase", "test_"):
+            self.assertIn(word, detail)
+
+    def test_F14_a_decorator_returning_a_non_callable_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", "@(lambda f: None)\ndef test_Q_gone():\n    raise RuntimeError('x')\n\n"
+                           "@(lambda f: 1)\ndef test_Q_one():\n    assert False\n\n" + FN_GREEN)
+
+    def test_F14_imported_names_stay_uncollected_beside_a_top_level_def_of_another_name(self):
+        files = {"helper_fx.py": self.HELPER}
+        self.assertVerdict("green", "from helper_fx import test_x\n\n" + FN_GREEN, files=files)
+        self.assertVerdict("green", "import helper_fx\ntest_y = helper_fx.test_z\n\n" + FN_GREEN, files=files)
+        self.assertVerdict("red", "from helper_fx import test_x\nimport helper_fx\ntest_y = helper_fx.test_z\n\n" + FN_RED, files=files)
+
+    # F15 defined in this file, by identity: the bound object is, or wraps, a function compiled from this file
+    PRE_FX = ("def pre(f):\n    def wrapper():\n        assert False, 'precondition'\n        return f()\n    return wrapper\n")
+    HELPER_FILES = {"helper_fx.py": HELPER + "\n" + DECO_FX + "\n" + PRE_FX}
+
+    def test_F15_a_def_rebound_by_from_import_to_an_imported_red_function_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", "def test_x():\n    pass\n\nfrom helper_fx import test_x\n\n" + FN_GREEN, files=self.HELPER_FILES)
+
+    def test_F15_a_def_rebound_by_from_import_beside_an_own_red_function_is_red(self):
+        self.assertVerdict("red", "def test_x():\n    pass\n\nfrom helper_fx import test_x\n\n" + FN_RED, files=self.HELPER_FILES)
+
+    def test_F15_a_def_rebound_to_an_imported_erroring_function_adds_nothing_to_an_own_red_function(self):
+        self.assertVerdict("red", "def test_z():\n    pass\n\nfrom helper_fx import test_z\n\n" + FN_RED, files=self.HELPER_FILES)
+
+    def test_F15_a_def_rebound_by_assignment_to_an_imported_red_function_is_not_collected(self):
+        self.assertVerdict("green", "import helper_fx\n\ndef test_y():\n    pass\n\ntest_y = helper_fx.test_x\n\n" + FN_GREEN,
+                           files=self.HELPER_FILES)
+        self.assertVerdict("red", "import helper_fx\n\ndef test_y():\n    pass\n\ntest_y = helper_fx.test_z\n\n" + FN_RED,
+                           files=self.HELPER_FILES)
+
+    def test_F15_a_def_rebound_by_a_star_import_is_not_collected(self):
+        self.assertVerdict("green", "def test_x():\n    pass\n\nfrom helper_fx import *\n\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("red", "def test_z():\n    pass\n\nfrom helper_fx import *\n\n" + FN_RED, files=self.HELPER_FILES)
+
+    def test_F15_a_foreign_wrapper_inside_a_module_level_if_failing_an_assertion_is_red(self):
+        body = self.FROM_DECO + "if True:\n    @deco\n    def test_Q_add():\n        assert False\n"
+        self.assertVerdict("red", body + "\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("red", body, files=self.HELPER_FILES)
+
+    def test_F15_a_foreign_wrapper_inside_a_module_level_try_failing_an_assertion_is_red(self):
+        body = self.FROM_DECO + "try:\n    @deco\n    def test_Q_add():\n        assert False\nexcept ImportError:\n    pass\n"
+        self.assertVerdict("red", body + "\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("red", body, files=self.HELPER_FILES)
+
+    def test_F15_a_foreign_wrapper_inside_a_module_level_with_failing_an_assertion_is_red(self):
+        body = (self.FROM_DECO + "import contextlib\n\nwith contextlib.nullcontext():\n"
+                "    @deco\n    def test_Q_add():\n        assert False\n")
+        self.assertVerdict("red", body + "\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("red", body, files=self.HELPER_FILES)
+
+    def test_F15_a_foreign_wrapper_inside_a_module_level_if_is_called_and_its_body_runs(self):
+        m = self.marker()
+        self.assertVerdict("red", self.FROM_DECO + "if True:\n    @deco\n    def test_Q_mark():\n        open(%r, 'w').write('x')\n\n" % m
+                           + FN_RED, files=self.HELPER_FILES)
+        self.assertTrue(os.path.exists(m), "the decorated function inside a module-level if was not called")
+
+    def test_F15_functools_cache_inside_a_module_level_if_failing_an_assertion_is_red(self):
+        body = "import functools\n\nif True:\n    @functools.cache\n    def test_Q_add():\n        assert False\n"
+        self.assertVerdict("red", body + "\n" + FN_GREEN)
+        self.assertVerdict("red", body)
+
+    def test_F15_foreign_wrappers_stacked_three_deep_are_followed_and_red(self):
+        self.assertVerdict("red", self.FROM_DECO + "@deco\n@deco\n@deco\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN,
+                           files=self.HELPER_FILES)
+
+    def test_F15_a_wrapper_the_file_defines_around_an_imported_red_function_is_red(self):
+        self.assertVerdict("red", "import helper_fx\n\ndef mine(f):\n    def w():\n        return f()\n    return w\n\n"
+                           "test_y = mine(helper_fx.test_x)\n\n" + FN_GREEN, files=self.HELPER_FILES)
+
+    def test_F15_a_helper_decorator_whose_wrapper_asserts_before_calling_the_test_is_red(self):
+        self.assertVerdict("red", "from helper_fx import pre\n\n@pre\ndef test_Q_add():\n    pass\n\n" + FN_GREEN, files=self.HELPER_FILES)
+
+    def test_F15_F1_imported_and_assigned_functions_are_still_not_collected(self):
+        self.assertVerdict("green", "from helper_fx import test_x\n\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("green", "import helper_fx\ntest_v = helper_fx.test_w\n\n" + FN_GREEN, files=self.HELPER_FILES)
+        self.assertVerdict("green", "from helper_fx import *\n\n" + FN_GREEN, files=self.HELPER_FILES)
+
+    def test_F15_F1_a_class_a_callable_object_and_a_partial_over_a_local_function_are_still_not_collected(self):
+        self.assertVerdict("green", "class test_thing:\n    def __init__(self):\n        raise AssertionError('class')\n\n" + FN_GREEN)
+        self.assertVerdict("green", "class Boom:\n    def __call__(self):\n        raise AssertionError('callable')\n\n"
+                           "test_obj = Boom()\n\n" + FN_GREEN)
+        self.assertVerdict("green", "import functools\n\ndef boom():\n    raise AssertionError('partial')\n\n"
+                           "test_partial = functools.partial(boom)\n\n" + FN_GREEN)
+
+    # F16 more links (a bound method's __func__, an instance's own attributes); inspection never escapes the loader
+    RETRY_FX = ("class retry:\n    def __init__(self, f):\n        self.f = f\n\n    def __call__(self):\n        return self.f()\n")
+    FOREIGN_FX = ("class Foreign:\n    def run(self):\n        assert False, 'foreign method'\n")
+    F16_FILES = {"helper_fx.py": HELPER + "\n" + DECO_FX + "\n" + PRE_FX + "\n" + RETRY_FX + "\n" + FOREIGN_FX}
+    FROM_RETRY = "from helper_fx import retry\n\n"
+
+    def test_F16_a_class_based_decorator_without_update_wrapper_failing_an_assertion_alone_is_red(self):
+        self.assertVerdict("red", self.FROM_RETRY + "@retry\ndef test_Q_add():\n    assert False\n", files=self.F16_FILES)
+
+    def test_F16_a_class_based_decorator_without_update_wrapper_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.FROM_RETRY + "@retry\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN,
+                           files=self.F16_FILES)
+
+    def test_F16_a_class_based_decorator_is_called_and_its_body_runs(self):
+        m = self.marker()
+        self.assertVerdict("red", self.FROM_RETRY + "@retry\ndef test_Q_mark():\n    open(%r, 'w').write('x')\n\n" % m + FN_RED,
+                           files=self.F16_FILES)
+        self.assertTrue(os.path.exists(m), "the function held by a class-based decorator was not called")
+
+    def test_F16_a_bound_method_of_a_class_the_file_defines_failing_an_assertion_is_red(self):
+        body = "class Checks:\n    def run(self):\n        assert False\n\ntest_Q_run = Checks().run\n"
+        self.assertVerdict("red", body)
+        self.assertVerdict("red", body + "\n" + FN_GREEN)
+
+    def test_F16_a_bound_method_of_a_class_from_the_helper_module_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", "from helper_fx import Foreign\n\ntest_Q_run = Foreign().run\n\n" + FN_GREEN, files=self.F16_FILES)
+
+    def test_F16_F1_a_partial_over_a_local_function_and_a_callable_object_holding_no_function_are_still_not_collected(self):
+        self.assertVerdict("green", "import functools\n\ndef boom():\n    raise AssertionError('partial')\n\n"
+                           "test_partial = functools.partial(boom)\n\n" + FN_GREEN)
+        self.assertVerdict("green", "class Boom:\n    def __init__(self):\n        self.n = 1\n        self.name = 'x'\n\n"
+                           "    def __call__(self):\n        raise AssertionError('callable')\n\n"
+                           "test_obj = Boom()\n\n" + FN_GREEN)
+        self.assertVerdict("green", "import helper_fx\n\nclass Holder:\n    def __init__(self):\n        self.f = helper_fx.test_x\n\n"
+                           "    def __call__(self):\n        return self.f()\n\ntest_held = Holder()\n\n" + FN_GREEN,
+                           files=self.F16_FILES)
+
+    CFG_KEYERROR = ("class Cfg:\n    def __call__(self):\n        pass\n\n"
+                    "    def __getattr__(self, name):\n        raise KeyError(name)\n\ntest_config = Cfg()\n\n")
+    CFG_RUNTIME = ("class Cfg:\n    def __call__(self):\n        pass\n\n"
+                   "    def __getattr__(self, name):\n        raise RuntimeError(name)\n\ntest_config = Cfg()\n\n")
+    CFG_CLASS = ("class Cfg:\n    def __call__(self):\n        pass\n\n"
+                 "    @property\n    def __class__(self):\n        raise RuntimeError('__class__')\n\ntest_config = Cfg()\n\n")
+
+    def test_F16_an_object_whose_getattr_raises_key_error_beside_a_red_function_is_red(self):
+        self.assertVerdict("red", self.CFG_KEYERROR + FN_RED)
+
+    def test_F16_an_object_whose_getattr_raises_key_error_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", self.CFG_KEYERROR + FN_GREEN)
+
+    def test_F16_an_object_whose_getattr_raises_runtime_error_beside_a_red_function_is_red(self):
+        self.assertVerdict("red", self.CFG_RUNTIME + FN_RED)
+
+    def test_F16_an_object_whose_getattr_raises_runtime_error_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", self.CFG_RUNTIME + FN_GREEN)
+
+    def test_F16_an_object_whose_class_property_raises_runtime_error_beside_a_red_function_is_red(self):
+        self.assertVerdict("red", self.CFG_CLASS + FN_RED)
+
+    def test_F16_an_object_whose_class_property_raises_runtime_error_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", self.CFG_CLASS + FN_GREEN)
+
+    # F17a each link is guarded: an exception on one link skips that link only; F17b expectedFailure along the path
+    PROXY_FX = ("class Client:\n    def __call__(self):\n        return None\n\n"
+                "    @property\n    def __class__(self):\n        raise RuntimeError('__class__')\n\n"
+                "def deco_proxy(fn):\n    client = Client()\n\n    def wrapper():\n        return fn(client)\n    return wrapper\n")
+    F17_FILES = {"helper_fx.py": HELPER + "\n" + DECO_FX + "\n" + PRE_FX + "\n" + RETRY_FX + "\n" + FOREIGN_FX + "\n" + PROXY_FX}
+    FROM_PROXY = "from helper_fx import deco_proxy\n\n"
+    XFAIL_BODY = "@unittest.expectedFailure\ndef test_Q_add():\n    assert False\n"
+
+    def test_F17_the_proxy_fixture_puts_the_raising_client_in_the_first_closure_cell(self):
+        d = self.tmp()
+        self.write(d, "helper_fx.py", self.F17_FILES["helper_fx.py"])
+        out = subprocess.run([sys.executable, "-c", "import helper_fx\nw = helper_fx.deco_proxy(len)\n"
+                              "print(w.__code__.co_freevars)\ntry:\n    w.__closure__[0].cell_contents.__class__\n"
+                              "except RuntimeError:\n    print('raises')\n"], cwd=d, capture_output=True, text=True)
+        self.assertEqual(out.stdout.split("\n")[:2], ["('client', 'fn')", "raises"], out)
+
+    def test_F17_a_wrapper_whose_closure_holds_a_raising_client_before_fn_alone_is_red(self):
+        self.assertVerdict("red", self.FROM_PROXY + "@deco_proxy\ndef test_Q_add(c):\n    assert False\n", files=self.F17_FILES)
+
+    def test_F17_a_wrapper_whose_closure_holds_a_raising_client_before_fn_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.FROM_PROXY + "@deco_proxy\ndef test_Q_add(c):\n    assert False\n\n" + FN_GREEN,
+                           files=self.F17_FILES)
+
+    def test_F17_a_wrapper_whose_closure_holds_a_raising_client_is_called_and_its_body_runs(self):
+        m = self.marker()
+        self.assertVerdict("red", self.FROM_PROXY + "@deco_proxy\ndef test_Q_mark(c):\n    open(%r, 'w').write('x')\n\n" % m
+                           + FN_RED, files=self.F17_FILES)
+        self.assertTrue(os.path.exists(m), "the function behind a wrapper whose closure holds a raising client was not called")
+
+    def test_F17_a_closure_wrapper_without_wraps_over_an_expected_failure_alone_is_green(self):
+        self.assertVerdict("green", HEAD + self.FROM_DECO + "@deco\n" + self.XFAIL_BODY, files=self.F17_FILES)
+
+    def test_F17_a_closure_wrapper_without_wraps_over_an_expected_failure_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", HEAD + self.FROM_DECO + "@deco\n" + self.XFAIL_BODY + "\n" + FN_GREEN, files=self.F17_FILES)
+
+    def test_F17_a_class_based_decorator_over_an_expected_failure_alone_is_green(self):
+        self.assertVerdict("green", HEAD + self.FROM_RETRY + "@retry\n" + self.XFAIL_BODY, files=self.F17_FILES)
+
+    def test_F17_a_class_based_decorator_over_an_expected_failure_beside_a_passing_function_is_green(self):
+        self.assertVerdict("green", HEAD + self.FROM_RETRY + "@retry\n" + self.XFAIL_BODY + "\n" + FN_GREEN, files=self.F17_FILES)
+
+    def test_F17_a_wrapped_expected_failure_beside_an_own_red_function_is_still_red(self):
+        self.assertVerdict("red", HEAD + self.FROM_DECO + "@deco\n" + self.XFAIL_BODY.replace("test_Q_add", "test_Q_other")
+                           + "\n" + FN_RED, files=self.F17_FILES)
+        self.assertVerdict("red", HEAD + self.FROM_RETRY + "@retry\n" + self.XFAIL_BODY.replace("test_Q_add", "test_Q_other")
+                           + "\n" + FN_RED, files=self.F17_FILES)
+
+    def test_F17_F11_a_foreign_wrapper_over_an_expected_failure_async_function_is_unverified_and_never_ran(self):
+        m = self.marker()
+        self.assertNeverRanWith(HEAD + self.FROM_DECO + "@deco\n@unittest.expectedFailure\nasync def test_Q_add():\n"
+                                "    open(%r, 'w').write('x')\n    assert False\n" % m, self.F17_FILES, m)
+        self.assertNeverRanWith(HEAD + self.FROM_DECO + "@deco\n@unittest.expectedFailure\nasync def test_Q_other():\n"
+                                "    assert False\n\n" + FN_GREEN, self.F17_FILES)
+
+    def test_F17_a_foreign_wrapper_over_a_plain_failing_function_without_the_flag_is_still_red(self):
+        self.assertVerdict("red", HEAD + self.FROM_DECO + "@deco\ndef test_Q_add():\n    assert False\n", files=self.F17_FILES)
+        self.assertVerdict("red", HEAD + self.FROM_RETRY + "@retry\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN,
+                           files=self.F17_FILES)
+
+    # F18 the expectedFailure flag is searched along every link, whether or not the bound object is compiled from the file
+    OWN_DECO = "def mydeco(f):\n    def w():\n        return f()\n    return w\n\n"
+    OWN_DECO2 = "def outer(f):\n    def w2():\n        return f()\n    return w2\n\n"
+    OWN_RETRY = "class myretry:\n    def __init__(self, f):\n        self.f = f\n\n    def __call__(self):\n        return self.f()\n\n"
+
+    def test_F18_a_wrapper_the_file_defines_over_an_expected_failure_alone_is_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + "@mydeco\n" + self.XFAIL_BODY)
+
+    def test_F18_a_wrapper_the_file_defines_over_an_expected_failure_beside_an_own_passing_function_is_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + "@mydeco\n" + self.XFAIL_BODY + "\n" + FN_GREEN)
+
+    def test_F18_two_stacked_wrappers_the_file_defines_over_an_expected_failure_are_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + self.OWN_DECO2 + "@outer\n@mydeco\n" + self.XFAIL_BODY)
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + self.OWN_DECO2 + "@outer\n@mydeco\n" + self.XFAIL_BODY
+                           + "\n" + FN_GREEN)
+
+    def test_F18_a_class_based_decorator_the_file_defines_over_an_expected_failure_is_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_RETRY + "@myretry\n" + self.XFAIL_BODY)
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_RETRY + "@myretry\n" + self.XFAIL_BODY + "\n" + FN_GREEN)
+
+    def test_F18_a_wrapper_the_file_defines_over_a_flagless_failing_function_is_still_red(self):
+        self.assertVerdict("red", HEAD + "\n" + self.OWN_DECO + "@mydeco\ndef test_Q_add():\n    assert False\n")
+        self.assertVerdict("red", HEAD + "\n" + self.OWN_DECO + "@mydeco\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN)
+
+    def test_F18_F11_a_wrapper_the_file_defines_over_an_expected_failure_async_function_is_unverified_and_never_ran(self):
+        m = self.marker()
+        self.assertNeverRanWith(HEAD + "\n" + self.OWN_DECO + "@mydeco\n@unittest.expectedFailure\nasync def test_Q_add():\n"
+                                "    open(%r, 'w').write('x')\n    assert False\n" % m, None, m)
+        self.assertNeverRanWith(HEAD + "\n" + self.OWN_DECO + "@mydeco\n@unittest.expectedFailure\nasync def test_Q_other():\n"
+                                "    assert False\n\n" + FN_GREEN, None)
+
+    # F19 the mark is a function's: a non-function object reached on the way is followed, never asked for the mark
+    EVERYTHING_FX = ("class Everything:\n    def __call__(self, *a):\n        return self\n\n"
+                     "    def __getattr__(self, name):\n        return Everything()\n\n"
+                     "def deco_everything(fn):\n    client = Everything()\n\n    def wrapper():\n        return fn(client)\n    return wrapper\n\n"
+                     "class retry_everything:\n    def __init__(self, f):\n        self.f = f\n\n    def __call__(self):\n        return self.f()\n\n"
+                     "    def __getattr__(self, name):\n        return Everything()\n")
+    F19_FILES = {"helper_fx.py": HELPER + "\n" + DECO_FX + "\n" + PRE_FX + "\n" + RETRY_FX + "\n" + FOREIGN_FX + "\n" + PROXY_FX
+                 + "\n" + EVERYTHING_FX}
+    FROM_EVERYTHING = "from helper_fx import deco_everything, retry_everything\n\n"
+    OWN_EVERYTHING = ("class Everything:\n    def __call__(self, *a):\n        return self\n\n"
+                      "    def __getattr__(self, name):\n        return Everything()\n\n"
+                      "class myretry_everything:\n    def __init__(self, f):\n        self.f = f\n\n    def __call__(self):\n        return self.f()\n\n"
+                      "    def __getattr__(self, name):\n        return Everything()\n\n"
+                      "def mydeco_everything(fn):\n    client = Everything()\n\n    def wrapper():\n        return fn(client)\n    return wrapper\n\n")
+
+    def test_F19_the_everything_fixture_answers_the_mark_truthily_from_a_closure_cell_and_a_decorator_instance(self):
+        d = self.tmp()
+        self.write(d, "helper_fx.py", self.F19_FILES["helper_fx.py"])
+        out = subprocess.run([sys.executable, "-c", "import inspect, helper_fx\n"
+                              "w = helper_fx.deco_everything(len)\nprint(w.__code__.co_freevars)\n"
+                              "c = w.__closure__[0].cell_contents\n"
+                              "print(bool(getattr(c, '__unittest_expecting_failure__', False)), inspect.isfunction(c))\n"
+                              "r = helper_fx.retry_everything(len)\n"
+                              "print(bool(getattr(r, '__unittest_expecting_failure__', False)), inspect.isfunction(r))\n"],
+                             cwd=d, capture_output=True, text=True)
+        self.assertEqual(out.stdout.split("\n")[:3], ["('client', 'fn')", "True False", "True False"], out)
+
+    def test_F19_a_helper_wrapper_closing_over_an_everything_proxy_over_a_flagless_failing_function_alone_is_red(self):
+        self.assertVerdict("red", self.FROM_EVERYTHING + "@deco_everything\ndef test_Q_add(c):\n    assert False\n",
+                           files=self.F19_FILES)
+
+    def test_F19_a_helper_wrapper_closing_over_an_everything_proxy_over_a_flagless_failing_function_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.FROM_EVERYTHING + "@deco_everything\ndef test_Q_add(c):\n    assert False\n\n" + FN_GREEN,
+                           files=self.F19_FILES)
+
+    def test_F19_a_helper_wrapper_closing_over_an_everything_proxy_over_a_name_error_beside_an_own_red_function_is_unverified(self):
+        self.assertErrorVerdict(self.FROM_EVERYTHING + "@deco_everything\ndef test_Q_other(c):\n    add(1)\n\n" + FN_RED,
+                                files=self.F19_FILES)
+
+    def test_F19_a_file_defined_wrapper_closing_over_an_everything_proxy_over_a_flagless_failing_function_is_red(self):
+        self.assertVerdict("red", self.OWN_EVERYTHING + "@mydeco_everything\ndef test_Q_add(c):\n    assert False\n")
+        self.assertErrorVerdict(self.OWN_EVERYTHING + "@mydeco_everything\ndef test_Q_other(c):\n    add(1)\n\n" + FN_RED)
+
+    def test_F19_a_class_based_decorator_whose_getattr_answers_every_name_over_a_flagless_failing_function_alone_is_red(self):
+        self.assertVerdict("red", self.FROM_EVERYTHING + "@retry_everything\ndef test_Q_add():\n    assert False\n",
+                           files=self.F19_FILES)
+
+    def test_F19_a_class_based_decorator_whose_getattr_answers_every_name_over_a_flagless_failing_function_beside_a_passing_function_is_red(self):
+        self.assertVerdict("red", self.FROM_EVERYTHING + "@retry_everything\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN,
+                           files=self.F19_FILES)
+
+    def test_F19_a_file_defined_class_based_decorator_whose_getattr_answers_every_name_over_a_flagless_failing_function_is_red(self):
+        self.assertVerdict("red", self.OWN_EVERYTHING + "@myretry_everything\ndef test_Q_add():\n    assert False\n")
+        self.assertVerdict("red", self.OWN_EVERYTHING + "@myretry_everything\ndef test_Q_add():\n    assert False\n\n" + FN_GREEN)
+
+    def test_F19_a_class_based_decorator_whose_getattr_answers_every_name_over_a_name_error_beside_an_own_red_function_is_unverified(self):
+        self.assertErrorVerdict(self.FROM_EVERYTHING + "@retry_everything\ndef test_Q_other():\n    add(1)\n\n" + FN_RED,
+                                files=self.F19_FILES)
+
+    def test_F19_F18_a_file_defined_wrapper_over_an_expected_failure_is_still_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + "@mydeco\n" + self.XFAIL_BODY)
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_DECO + "@mydeco\n" + self.XFAIL_BODY + "\n" + FN_GREEN)
+
+    def test_F19_F18_a_class_based_decorator_over_an_expected_failure_is_still_green(self):
+        self.assertVerdict("green", HEAD + "\n" + self.OWN_RETRY + "@myretry\n" + self.XFAIL_BODY)
+        self.assertVerdict("green", HEAD + self.FROM_RETRY + "@retry\n" + self.XFAIL_BODY + "\n" + FN_GREEN, files=self.F19_FILES)
+
+    def test_F19_F18_a_foreign_wrapper_over_an_expected_failure_is_still_green(self):
+        self.assertVerdict("green", HEAD + self.FROM_DECO + "@deco\n" + self.XFAIL_BODY, files=self.F19_FILES)
+
+class G12FunctionsValidate(Gate):
+    """worker.validate with worker.load_member("teujip") on temporary git projects holding function-style tests."""
+
+    ANS = G4Validate.ANS
+    run_validate = G4Validate.run_validate
+    failed_with = G4Validate.failed_with
+
+    def test_F8_a_red_function_file_passes(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "tests/test_x.py", FN_RED)
+        out = self.run_validate(d, before)
+        self.assertEqual(out["status"], "done", out)
+
+    def test_F8_a_green_function_file_decides_nothing(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "tests/test_x.py", "def test_Q_add():\n    assert True\n")
+        out = self.run_validate(d, before)
+        self.failed_with(out, "red-before-build: tests/test_x.py passes before the build — it decides nothing")
+
+    def test_F8_an_erroring_function_file_is_not_verified_red(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "tests/test_x.py", FN_RED + "def test_Q_other():\n    import app_not_built_q\n")
+        out = self.run_validate(d, before)
+        self.failed_with(out, "red-before-build: tests/test_x.py is not verified red — ")
+        self.assertFalse(any(NO_TESTS_RAN in n for n in out["non-claims"]), out)
+
+    def test_F8_a_support_file_defining_a_collected_function_is_refused(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "helper_fx.py", "VALUE = 1\n\ndef test_helper():\n    assert VALUE == 1\n")
+        self.write(d, "tests/test_x.py", "from helper_fx import VALUE\n\ndef test_Q_add():\n    assert VALUE == 2\n")
+        ans = dict(json.loads(json.dumps(self.ANS)), tests=["tests/test_x.py", "helper_fx.py"], support=["helper_fx.py"])
+        out = self.run_validate(d, before, ans)
+        self.failed_with(out, "red-before-build: helper_fx.py is declared support — it holds")
+
+    def test_F8_a_support_helper_with_only_uncollected_functions_is_accepted(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "other_fx.py", "def test_imp(tmp_path):\n    assert False\n")   # needs an argument: not collected here either
+        self.write(d, "helper_fx.py", "from other_fx import test_imp\nimport other_fx\ntest_alias = other_fx.test_imp\nVALUE = 1\n\n"
+                   "def test_needs(tmp_path):\n    assert False\n\ndef check_value():\n    assert VALUE == 1\n")
+        self.write(d, "tests/test_x.py", "from helper_fx import VALUE\n\ndef test_Q_add():\n    assert VALUE == 2\n")
+        ans = dict(json.loads(json.dumps(self.ANS)), tests=["tests/test_x.py", "helper_fx.py", "other_fx.py"],
+                   support=["helper_fx.py", "other_fx.py"])
+        out = self.run_validate(d, before, ans)
+        self.assertEqual(out["status"], "done", out)
+        self.assertIn("support (protected with the tests, not red evidence): helper_fx.py, other_fx.py", out["non-claims"], out)
+
+
+    def test_F10_an_async_only_file_is_not_verified_red(self):
+        d = self.repo()
+        before = worker.tree_state(d)
+        self.write(d, "tests/test_x.py", G11Functions.ASYNC_ONLY)
+        out = self.run_validate(d, before)
+        self.failed_with(out, "red-before-build: tests/test_x.py is not verified red — ")
+        self.assertFalse(any(NO_TESTS_RAN in n for n in out["non-claims"]), out)
 
 
 if __name__ == "__main__":

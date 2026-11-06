@@ -82,7 +82,7 @@ session's actual tools or capabilities.
 (git) · `checks-ran` every `verified[].check` appears as a command in the transcript (compared as shell tokens:
 quoting is not a difference, nor a leading `cd <dir> &&` into the project — the shell stays where it was between calls, so
 the claim's directory is compared with where the command ran, a command with no `cd` having run at the root; a `cd` out of
-the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every runnable file (`tests` minus `support`) is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter using the test context's `cwd` and `python` (request `test-context`, else project `hacheong/test-context.json`; omitted keys default to the project root and `python3`, else `python`), it ran at least one test and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` classifies mentions of changes outside `tests`, `tests/` or `test/`: wrote fails, unclear fails with a command quote, proved reads are not held against the member · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
+the project, or one only the shell could resolve — `cd -`, `$VAR`, a glob — is part of the command) · `red-before-build` every runnable file (`tests` minus `support`) is verified red now: loaded as `python -m unittest <file>` loads it, in a fresh interpreter using the test context's `cwd` and `python` (request `test-context`, else project `hacheong/test-context.json`; omitted keys default to the project root and `python3`, else `python`), it ran at least one test (a TestCase test as `python -m unittest <file>` loads it, or a module-level `test_*` function the file itself defines that can be called with no arguments) and failed at least one assertion (an `AssertionError`) inside a test body, with no error of any kind (import, syntax, loader, setUp/tearDown, runtime; whatever a test marked `@unittest.expectedFailure` raises is filed as an expected failure — never red evidence, not an error — except a function whose body never ran) and no assertion failing outside a test body — judged from unittest's own result, not the exit code or its printed output; anything else is `not verified red`, a passing file `decides nothing` (one its writer deleted — in the tree when the call began, or tracked at HEAD, and absent now — is the contract retiring it: said as `deleted by the writer: <path> — the contract retires it`, and skipped; so is a path in the request's `deleted-tests`) · `only-tests-touched` classifies mentions of changes outside `tests`, `tests/` or `test/`: wrote fails, unclear fails with a command quote, proved reads are not held against the member · `tests-kept` the request's `tests` are as they were when the session started (the working tree,
 uncommitted changes included — put back to HEAD is changed too; a protected test that is not in the tree fails it, since nothing was kept), and the request's `deleted-tests` — the contract's tests its writer deleted, which chongdae leaves out of `tests` — are still absent (a build that brings one back changed the contract) · `readme-only` no source file was opened (Read or
 shell) — a newbie who peeked is tainted.
 
@@ -108,9 +108,38 @@ the validator set. A member may not change these; when they must change, this pl
 
 - `--max-turns` and `HACHEONG_CONTINUATIONS` bound Claude calls only. The Codex adapter passes no turn or wall-clock
   limit to `codex exec`; its call ends when the host exits.
-- `red-before-build` verifies runnable Python `unittest` files only, in the declared test context through a
-  harness that reports unittest's own result in a scratch file outside the project. A direct script, a pytest-style
-  module, a JavaScript test or any other non-`.py` file is `not verified red` and fails the answer; no other runner is
+- `red-before-build` verifies runnable Python files in the declared test context through a
+  harness that reports unittest's own result in a scratch file outside the project. A test is a TestCase test as
+  `python -m unittest <file>` loads it, or a module-level `test_*` function the file itself defines that can be called
+  with no arguments, judged by the signature of the object the module binds to that name
+  (`inspect.signature(obj, follow_wrapped=False)`). Defined in this file means a function compiled from the file
+  (`os.path.realpath` of its `__code__.co_filename` equals that of the module's `__file__`), or a callable that is
+  not a class and wraps one through `__wrapped__`, a wrapper function's closure cells, a bound method's `__func__`,
+  or a callable object's own instance attributes, following those links up to four levels with cycle protection.
+  An exception while reading or inspecting one link skips only that link; the other links are still followed.
+  An exception while the harness inspects an object never escapes: a link whose reading raises is skipped, and an
+  object none of whose links reaches a function compiled from the file (one whose attribute access raises included)
+  is not collected; neither affects the file's other tests. This holds whatever decorator produced it and wherever in the module the
+  `def` stands, including inside a module-level `if`, `try` or `with`; a name rebound to an imported function is
+  not the file's. Without a module `__file__`, this rule collects nothing. If reading its signature raises
+  anything (a `ValueError`, or a `TypeError` from a `__signature__` that is not one), a wrapper that is not itself a
+  plain function is collected and called anyway; a plain function is not. Only a `TypeError` from binding no arguments
+  means it needs arguments. An `AssertionError` raised anywhere under a collected test's call — its body, a helper, or a decorator's
+  wrapper — is red evidence, as for a decorated TestCase method. A decorator's wrapper with no required arguments
+  (including `unittest.mock.patch`'s, which injects the mock) is collected and called; if that call fails for a
+  missing argument, it is an error, never a silent drop. Imported functions, functions needing arguments and anything a module's `load_tests` leaves out
+  are not run. An `async def` or generator test function is an error — red-before-build calls it and its body never runs
+  (a TestCase's `async def` method is not awaited either: use `unittest.IsolatedAsyncioTestCase`).
+  `@unittest.expectedFailure` counts when it marks the bound function or any plain function reachable through those
+  links, including through a wrapper the file itself defines. A non-function object on the way is followed, never
+  asked for the mark. This differs from a TestCase method, whose mark unittest reads from the bound method alone:
+  a wrapper that does not copy it hides it.
+  A pytest-style module's zero-argument functions run this way, but pytest does not: no fixtures,
+  parametrize, conftest.py or marks. Under `@unittest.expectedFailure`, unittest files whatever a test raises —
+  TestCase method or function alike — as an expected failure, which is never red evidence and not an error;
+  only a function whose body never ran is an error even then. A suite's own skip exception is an error; `unittest.SkipTest`, or a subclass,
+  skips. A file's own `__main__` runner never runs. A direct script with no collected tests, a JavaScript test or any
+  other non-`.py` file is `not verified red` and fails the answer; no other runner is
   chosen from a file's extension or directory. Support belongs in `support` and `tests`: it stays protected but is not red evidence.
   `support` must be an array of safe project-relative paths to regular files, each also in `tests`; list the files themselves, not directories. Absent or null means `[]`.
   A `test*.py` support file or one loading unittest tests fails; an unloadable helper is a non-claim. At least one

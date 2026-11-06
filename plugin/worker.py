@@ -420,7 +420,7 @@ def red_verdict(report):
     if report["fixture_failures"]:
         return "unverified", "an assertion failed outside a test body"
     if not report["tests_run"]:
-        return "unverified", "no tests ran: only unittest TestCase tests are verified"
+        return "unverified", "no tests ran: unittest found no TestCase test and no module-level test_* function this file defines that can be called with no arguments"
     if report["assertion_failures"]:
         return "red", "unittest recorded an assertion failure inside a test body"
     return "green", "unittest recorded no assertion failures inside test bodies"
@@ -429,10 +429,167 @@ def red_verdict(report):
 # Run in the target's interpreter: TestProgram supplies the same file loading as `python -m unittest`.
 # The scratch file carries only the report, independently of anything tests print to stdout or stderr.
 UNITTEST_RED_HARNESS = r'''
+import inspect
 import json
 import os
 import sys
 import unittest
+
+def own(obj, filename, levels=4, seen=()):
+    # Decide ownership only, following guarded identity links.
+    if filename is None or not callable(obj) or inspect.isclass(obj) or id(obj) in seen:
+        return False
+    if inspect.isfunction(obj) and os.path.realpath(obj.__code__.co_filename) == filename:
+        return True
+    if levels == 0:
+        return False
+    seen = seen + (id(obj),)
+
+    def follow(read):
+        try:
+            return own(read(), filename, levels - 1, seen)
+        except Exception:
+            return False
+
+    result = follow(lambda: getattr(obj, "__wrapped__", None))
+    if result:
+        return result
+    if inspect.isfunction(obj):
+        for cell in obj.__closure__ or ():
+            result = follow(lambda: cell.cell_contents)
+            if result:
+                return result
+    else:
+        result = follow(lambda: getattr(obj, "__func__", None))
+        if result:
+            return result
+        try:
+            values = vars(obj).values()
+        except Exception:
+            values = ()
+        for value in values:
+            result = follow(lambda: value)
+            if result:
+                return result
+    return False
+
+def expecting(obj, levels=4, seen=()):
+    # Search the flag independently of where ownership was established.
+    if not callable(obj) or inspect.isclass(obj) or id(obj) in seen:
+        return False
+    try:
+        if inspect.isfunction(obj) and bool(getattr(obj, "__unittest_expecting_failure__", False)):
+            return True
+    except Exception:
+        pass
+    if levels == 0:
+        return False
+    seen = seen + (id(obj),)
+
+    def follow(read):
+        try:
+            return expecting(read(), levels - 1, seen)
+        except Exception:
+            return False
+
+    if follow(lambda: getattr(obj, "__wrapped__", None)):
+        return True
+    try:
+        plain_function = inspect.isfunction(obj)
+    except Exception:
+        plain_function = False
+    if plain_function:
+        try:
+            cells = obj.__closure__ or ()
+        except Exception:
+            cells = ()
+        for cell in cells:
+            if follow(lambda: cell.cell_contents):
+                return True
+    elif callable(obj):
+        if follow(lambda: getattr(obj, "__func__", None)):
+            return True
+        try:
+            values = vars(obj).values()
+        except Exception:
+            values = ()
+        for value in values:
+            if follow(lambda: value):
+                return True
+    return False
+
+class FunctionTestCase(unittest.FunctionTestCase):
+    def id(self):
+        return self.function_name
+
+    def __str__(self):
+        return "%s.%s (%s)" % (type(self).__module__, type(self).__qualname__, self.id())
+
+    def runTest(self):
+        value = self._testFunc()
+        if inspect.iscoroutine(value):
+            kind = "coroutine"
+        elif inspect.isgenerator(value):
+            kind = "generator"
+        elif inspect.isasyncgen(value):
+            kind = "async generator"
+        else:
+            return
+        if kind != "async generator":
+            value.close()
+        self.body_never_ran = True
+        raise TypeError("%s returned a %s: its body never ran — red-before-build calls a test function "
+                        "and does not run an event loop or iterate a generator" %
+                        (getattr(self._testFunc, "__name__", repr(self._testFunc)), kind))
+
+class Loader(unittest.TestLoader):
+    def loadTestsFromModule(self, module, *args, **kwargs):
+        # unittest itself checks each object's class before our function collection.
+        # Hide uninspectable test objects from that pass without changing the module.
+        unreadable = []
+        for name, obj in vars(module).items():
+            if name.startswith("test_"):
+                try:
+                    inspect.isclass(obj)
+                except Exception:
+                    unreadable.append(name)
+        if unreadable:
+            view = type(sys)(module.__name__)
+            vars(view).update(vars(module))
+            for name in unreadable:
+                del vars(view)[name]
+            module = view
+        suite = super().loadTestsFromModule(module, *args, **kwargs)
+        if hasattr(module, "load_tests"):
+            return suite
+        case_type = type("ModuleFunctionTestCase", (FunctionTestCase,),
+                         {"__module__": module.__name__})
+        source_path = getattr(module, "__file__", None)
+        filename = os.path.realpath(source_path) if source_path is not None else None
+        for name, function in sorted(vars(module).items()):
+            try:
+                if not name.startswith("test_"):
+                    continue
+                if not own(function, filename):
+                    continue
+                plain_function = inspect.isfunction(function)
+                try:
+                    signature = inspect.signature(function, follow_wrapped=False)
+                except Exception:
+                    if plain_function:
+                        continue
+                else:
+                    try:
+                        signature.bind()
+                    except TypeError:
+                        continue
+                case = case_type(function)
+                case.function_name = getattr(function, "__name__", name)
+                case.__unittest_expecting_failure__ = expecting(function)
+            except Exception:
+                continue
+            suite.addTest(case)
+        return suite
 
 class Result(unittest.TestResult):
     def __init__(self):
@@ -448,6 +605,12 @@ class Result(unittest.TestResult):
     def addError(self, test, err):
         self.problem(test, err)
         super().addError(test, err)
+
+    def addExpectedFailure(self, test, err):
+        if isinstance(test, FunctionTestCase) and getattr(test, "body_never_ran", False):
+            self.addError(test, err)
+        else:
+            super().addExpectedFailure(test, err)
 
     def classify_failure(self, test, err):
         if not isinstance(err[0], type) or not issubclass(err[0], AssertionError):
@@ -489,7 +652,7 @@ class Runner:
         return result
 
 path, report_path = sys.argv[1], sys.argv[2]
-loader = unittest.TestLoader()
+loader = Loader()
 try:
     program = unittest.main(module=None, argv=["unittest", path], testRunner=Runner(),
                             testLoader=loader, exit=False)
